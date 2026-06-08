@@ -17,6 +17,20 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+// CORS / anti-CSRF: no se expone Access-Control-Allow-Origin (los navegadores
+// bloquean llamadas de otros sitios) y, si viene cabecera Origin, debe ser el
+// mismo host del sitio. Se autoadapta a cualquier dominio donde se despliegue.
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '') {
+    $oHost = parse_url($origin, PHP_URL_HOST) ?: '';
+    $host  = preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? '');
+    if (strcasecmp((string)$oHost, (string)$host) !== 0) {
+        http_response_code(403);
+        echo json_encode(['ok' => false]);
+        exit;
+    }
+}
+
 // Rate limiting por IP (usando archivos temporales)
 $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 $rateFile = sys_get_temp_dir() . '/korbax_rl_' . md5($ip) . '.json';
