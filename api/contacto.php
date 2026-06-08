@@ -1,8 +1,14 @@
 <?php
 declare(strict_types=1);
 
+// No filtrar errores al cliente (los detalles solo deben ir al log del servidor)
+ini_set('display_errors', '0');
+error_reporting(E_ALL);
+@header_remove('X-Powered-By');
+
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
 
 // Solo POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {

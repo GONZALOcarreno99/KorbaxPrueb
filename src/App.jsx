@@ -1521,7 +1521,7 @@ function ARModal({ model, logo, finish, placement, onClose }) {
           ref={mvRef}
           src={src}
           ar="true"
-          ar-modes="webxr scene-viewer quick-look"
+          ar-modes="scene-viewer quick-look"
           ar-placement="floor"
           ar-scale="auto"
           camera-controls="true"
