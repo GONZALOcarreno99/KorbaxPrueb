@@ -2716,7 +2716,7 @@ export default function App() {
           <div className="hero-shape-2 absolute bottom-16 right-[22%] w-72 h-72 rounded-full blur-3xl opacity-40" style={{ background: `${C.petrol}12` }} />
           <div className="hero-shape-3 absolute top-48 left-[2%] w-56 h-56 rounded-full blur-2xl opacity-50" style={{ background: `${C.sand}12` }} />
         </div>
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 w-full min-w-0 pt-4 pb-10 sm:py-20 grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-16 items-center relative z-10">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 w-full min-w-0 pt-4 pb-10 sm:py-20 grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-16 items-center lg:items-start relative z-10">
           <div className="min-w-0 order-2 lg:order-1">
             <div className="anim-1 inline-flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl mb-7 font-nunito border leading-snug text-left"
               style={{ color: C.petrol, background: `${C.sand}1f`, borderColor: `${C.sand}66` }}>
