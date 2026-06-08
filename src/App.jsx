@@ -97,6 +97,10 @@ const AR_MODELS = {
 }
 const arModelFor = (svgType) => AR_MODELS[svgType] ?? '/models/silla.glb'
 
+// Prefija la base del sitio (en GitHub Pages la web vive en /KorbaxPrueb/).
+// import.meta.env.BASE_URL = '/' en dev y '/KorbaxPrueb/' en build.
+const asset = (p) => import.meta.env.BASE_URL + String(p).replace(/^\//, '')
+
 // Proporción (ancho/alto) de la superficie donde se estampa el logo en cada .glb
 // (debe coincidir con los quads de logo de gen-models.mjs). Evita que el logo se deforme.
 const AR_LOGO_ASPECT = {
@@ -604,7 +608,7 @@ function LoadingScreen({ onDone }) {
         <div className="relative">
           <div className="absolute inset-0 rounded-3xl border-2 pulse-ring" style={{ borderColor: `${C.sand}55` }} />
           <div className="absolute inset-0 rounded-3xl border pulse-ring" style={{ borderColor: `${C.sand}30`, animationDelay: '1.2s' }} />
-          <img src="/logo.jpg" alt="Korbax" className="w-28 h-28 rounded-3xl object-cover relative z-10"
+          <img src={asset('/logo.jpg')} alt="Korbax" className="w-28 h-28 rounded-3xl object-cover relative z-10"
             style={{ border: `3px solid ${C.sand}` }} />
         </div>
         <div className="text-center">
@@ -677,7 +681,7 @@ function CatalogPage({ onClose }) {
     <div className="fixed inset-0 z-50 flex flex-col overflow-hidden" style={{ background: C.ivory }}>
       <div className="px-4 sm:px-8 py-4 flex items-center justify-between shrink-0" style={{ background: C.petrol }}>
         <div className="flex items-center gap-3">
-          <img src="/logo.jpg" alt="Korbax" className="h-9 w-9 rounded-xl object-cover" />
+          <img src={asset('/logo.jpg')} alt="Korbax" className="h-9 w-9 rounded-xl object-cover" />
           <div>
             <p className="font-outfit font-black text-lg uppercase leading-tight" style={{ color: C.onDark }}>Catálogo Completo</p>
             <p className="text-xs font-nunito" style={{ color: C.mist }}>Industrias Korbax — {Object.values(CATALOG).flat().length} modelos disponibles</p>
@@ -1447,7 +1451,7 @@ function RoomScene({ model, accent, wood, steel, logo, placement, estType }) {
 /* ════════════════ AR MODAL (Realidad Aumentada con model-viewer) ════════════════ */
 function ARModal({ model, logo, finish, placement, onClose }) {
   const C = useContext(ThemeCtx)
-  const src = arModelFor(model.svgType)
+  const src = asset(arModelFor(model.svgType))
   const mvRef = useRef(null)
   const logoPbrRef = useRef(null)
   const debRef = useRef(null)
@@ -2647,7 +2651,7 @@ export default function App() {
       <nav className="fixed top-0 inset-x-0 z-40 theme-transition" style={{ background: C.petrol, borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <a href="#/" className="flex items-center gap-3 shrink-0">
-            <img src="/logo.jpg" alt="Industrias Korbax" className="h-10 w-10 rounded-xl object-cover" />
+            <img src={asset('/logo.jpg')} alt="Industrias Korbax" className="h-10 w-10 rounded-xl object-cover" />
             <div className="leading-tight">
               <p className="font-outfit font-black text-[1.15rem] uppercase tracking-wide leading-none" style={{ color: C.onDark }}>Korbax</p>
               <p className="text-[9px] font-nunito leading-none tracking-[0.2em] uppercase" style={{ color: C.mist }}>Industrias</p>
@@ -2775,7 +2779,7 @@ export default function App() {
                 <div className="absolute inset-0 rounded-3xl border pulse-ring" style={{ borderColor: `${C.petrol}25`, animationDelay: '1.4s' }} />
                 <div className="w-56 h-56 sm:w-64 sm:h-64 rounded-3xl overflow-hidden relative border-4"
                   style={{ borderColor: C.onDark, boxShadow: `0 20px 60px ${C.carbon}22` }}>
-                  <img src="/logo.jpg" alt="Industrias Korbax" className="w-full h-full object-cover" />
+                  <img src={asset('/logo.jpg')} alt="Industrias Korbax" className="w-full h-full object-cover" />
                   <div className="absolute bottom-0 left-0 right-0 h-1" style={{ background: `linear-gradient(90deg, ${C.petrol}, ${C.sand})` }} />
                 </div>
                 <div className="absolute -top-3 -right-3 w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg"
@@ -3072,7 +3076,7 @@ export default function App() {
           <div className="py-10 sm:py-12 grid grid-cols-1 sm:grid-cols-3 gap-8">
             <div>
               <div className="flex items-center gap-3 mb-4">
-                <img src="/logo.jpg" alt="Industrias Korbax" className="h-11 w-11 rounded-xl object-cover" />
+                <img src={asset('/logo.jpg')} alt="Industrias Korbax" className="h-11 w-11 rounded-xl object-cover" />
                 <div>
                   <p className="font-outfit font-black uppercase text-base leading-none" style={{ color: C.onDark }}>Industrias Korbax</p>
                   <p className="text-xs font-nunito mt-0.5" style={{ color: C.stone }}>Villa El Salvador, Lima</p>
