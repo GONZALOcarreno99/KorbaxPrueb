@@ -18,7 +18,10 @@ $limit = 5;
 $window = 3600; // 1 hora
 
 $now = time();
-$rl = file_exists($rateFile) ? json_decode(file_get_contents($rateFile), true) : ['count' => 0, 'reset' => $now + $window];
+$rl = file_exists($rateFile) ? json_decode((string)file_get_contents($rateFile), true) : null;
+if (!is_array($rl) || !isset($rl['count'], $rl['reset'])) {
+    $rl = ['count' => 0, 'reset' => $now + $window];
+}
 
 if ($now > $rl['reset']) {
     $rl = ['count' => 0, 'reset' => $now + $window];
@@ -33,8 +36,13 @@ if ($rl['count'] >= $limit) {
 $rl['count']++;
 file_put_contents($rateFile, json_encode($rl), LOCK_EX);
 
-// Leer JSON
-$raw = file_get_contents('php://input');
+// Leer JSON (cap de tamaño para evitar abuso/DoS)
+$raw = file_get_contents('php://input', false, null, 0, 50000);
+if ($raw === false || strlen($raw) >= 50000) {
+    http_response_code(413);
+    echo json_encode(['ok' => false]);
+    exit;
+}
 $data = json_decode($raw, true);
 
 if (!is_array($data)) {
@@ -51,14 +59,22 @@ if (!empty($data['hp'])) {
 }
 
 // Sanitizar y validar
-function clean(mixed $val): string {
-    return htmlspecialchars(strip_tags(trim((string)($val ?? ''))), ENT_QUOTES, 'UTF-8');
+// Campo de una línea: sin etiquetas ni caracteres de control/saltos (anti inyección de cabeceras)
+function clean_line(mixed $val): string {
+    $s = strip_tags(trim((string)($val ?? '')));
+    return (string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $s);
+}
+// Texto multilínea (mensaje): permite saltos de línea, quita control peligroso y normaliza CRLF
+function clean_text(mixed $val): string {
+    $s = strip_tags(trim((string)($val ?? '')));
+    $s = (string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/u', '', $s);
+    return str_replace("\r\n", "\n", $s);
 }
 
-$nombre = clean($data['nombre'] ?? '');
-$empresa = clean($data['empresa'] ?? '');
-$telefono = clean($data['telefono'] ?? '');
-$mensaje = clean($data['mensaje'] ?? '');
+$nombre = clean_line($data['nombre'] ?? '');
+$empresa = clean_line($data['empresa'] ?? '');
+$telefono = clean_line($data['telefono'] ?? '');
+$mensaje = clean_text($data['mensaje'] ?? '');
 $consentimiento = !empty($data['consentimiento']);
 
 if ($nombre === '' || $telefono === '' || $mensaje === '' || !$consentimiento) {
@@ -68,7 +84,14 @@ if ($nombre === '' || $telefono === '' || $mensaje === '' || !$consentimiento) {
 }
 
 // Validaciones adicionales
-if (mb_strlen($nombre) > 120 || mb_strlen($telefono) > 30 || mb_strlen($mensaje) > 2000) {
+if (mb_strlen($nombre) > 120 || mb_strlen($empresa) > 120 || mb_strlen($telefono) > 30 || mb_strlen($mensaje) > 2000) {
+    http_response_code(422);
+    echo json_encode(['ok' => false]);
+    exit;
+}
+
+// El teléfono solo admite dígitos y símbolos de marcación
+if (!preg_match('/^[0-9+\-\s().]{6,30}$/', $telefono)) {
     http_response_code(422);
     echo json_encode(['ok' => false]);
     exit;
@@ -94,7 +117,6 @@ $headers = implode("\r\n", [
     'Reply-To: ' . filter_var($destinatario, FILTER_SANITIZE_EMAIL),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
-    'X-Mailer: PHP/' . PHP_VERSION,
 ]);
 
 $enviado = mail($destinatario, $asunto, $cuerpo, $headers);

@@ -16,16 +16,17 @@ RewriteRule ^ /index.html [L]
     Header always set X-Content-Type-Options "nosniff"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
     Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
-    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none';"
+    Header always set Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://ajax.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://images.unsplash.com; connect-src 'self'; worker-src 'self' blob:; frame-src https://www.google.com https://maps.google.com; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
     Header always unset X-Powered-By
     Header always unset Server
 </IfModule>
 
-# Bloquear acceso directo a PHP del cliente
-<FilesMatch "\.php$">
-    Order Allow,Deny
-    Allow from all
+# Bloquear acceso a archivos ocultos/fuente que no deben servirse (.git, .env, fuentes)
+<FilesMatch "(^\.|\.(mjs|md|lock|log|sh)$)">
+    Require all denied
 </FilesMatch>
+# Evitar listado de directorios
+Options -Indexes
 
 # Comprimir assets
 <IfModule mod_deflate.c>
