@@ -2709,7 +2709,7 @@ export default function App() {
 
       {/* ════════ HERO ════════ */}
       {route === 'home' && (<>
-      <section className="hero-grid relative min-h-screen flex items-center overflow-hidden pt-16" style={{ background: C.ivory }}>
+      <section className="hero-grid relative min-h-[100svh] flex items-center overflow-hidden pt-16" style={{ background: C.ivory }}>
         <Particles />
         <div className="absolute inset-0 pointer-events-none select-none overflow-hidden">
           <div className="hero-shape-1 absolute top-16 right-[4%] w-80 h-80 rounded-full blur-3xl opacity-60" style={{ background: `${C.sand}20` }} />
@@ -2726,7 +2726,7 @@ export default function App() {
             <h1 className="anim-2 font-outfit font-black uppercase leading-[0.95] mb-5 break-words"
               style={{ fontSize: 'clamp(2.3rem, 7.5vw, 5.2rem)', color: C.carbon }}>
               Sillas y mesas
-              <span className="block">
+              <span className="block min-h-[1.9em]">
                 <span className="text-gradient"><TypedText texts={HERO_TEXTS} /></span>
                 <span className="inline-block align-middle ml-1 rounded-sm typing-cursor" style={{ width: '3px', height: '0.82em', background: C.sand }} />
               </span>
