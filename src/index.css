@@ -108,3 +108,10 @@ body {
 :root[data-dark="true"] ::-webkit-scrollbar-thumb { background: #1C2E30; border-radius: 8px; }
 
 html{ scroll-behavior:smooth; }
+
+@keyframes arqPop { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform:none; } }
+.arq-pop { animation: arqPop .4s ease both; }
+@keyframes arqBar { from { width:0; } to { width:100%; } }
+.arq-bar { width:0; animation: arqBar 1.45s ease forwards; }
+@keyframes arqStep { from { opacity:0; transform: translateX(-6px); } to { opacity:1; transform:none; } }
+.arq-step { opacity:0; animation: arqStep .35s ease forwards; }

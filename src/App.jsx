@@ -9,6 +9,7 @@ import {
   ShoppingBag, Search, CreditCard, Clock, Award, FileText
 } from 'lucide-react'
 import './index.css'
+import { buildSalonURL } from './salon3d'
 
 /* ── paletas ── */
 const LIGHT_C = {
@@ -96,6 +97,25 @@ const AR_MODELS = {
   barra: '/models/barra.glb', mostrador: '/models/barra.glb',
 }
 const arModelFor = (svgType) => AR_MODELS[svgType] ?? '/models/silla.glb'
+
+// Carga model-viewer (~935KB) SOLO cuando se abre el AR — así no pesa en cada página.
+let _mvLoaderPromise = null
+function ensureModelViewer() {
+  if (typeof window === 'undefined') return Promise.resolve()
+  if (window.customElements && window.customElements.get('model-viewer')) return Promise.resolve()
+  if (_mvLoaderPromise) return _mvLoaderPromise
+  _mvLoaderPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.type = 'module'
+    s.src = 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js'
+    s.integrity = 'sha384-Ftcjj/GNLxPvzNDftO/oryXB9aGxsGZY9JGqsXG0uUKgQDl9RfDgsx9NJ/4IVNPe'
+    s.crossOrigin = 'anonymous'
+    s.onload = resolve
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+  return _mvLoaderPromise
+}
 
 // Prefija la base del sitio (en GitHub Pages la web vive en /KorbaxPrueb/).
 // import.meta.env.BASE_URL = '/' en dev y '/KorbaxPrueb/' en build.
@@ -192,7 +212,7 @@ function useScrollReveal(dep) {
 }
 
 // Router minimalista por hash: '', '#/configurador', '#/catalogo', etc.
-const ROUTES = ['home', 'catalogo', 'configurador', 'galeria', 'nosotros', 'contacto']
+const ROUTES = ['home', 'arquitecto', 'catalogo', 'configurador', 'galeria', 'nosotros', 'contacto']
 function useRoute() {
   const read = () => {
     const h = window.location.hash.replace(/^#\/?/, '').toLowerCase()
@@ -236,7 +256,7 @@ function useCartState() {
   const qtyOf = (key) => cart[key]?.qty || 0
   const totalQty  = Object.values(cart).reduce((a, i) => a + i.qty, 0)
   const lineCount = Object.keys(cart).length
-  return { cart, add, inc, dec, remove, clear, qtyOf, totalQty, lineCount, open, setOpen }
+  return { cart, add, setQty, inc, dec, remove, clear, qtyOf, totalQty, lineCount, open, setOpen }
 }
 
 function useScrollProgress() {
@@ -437,89 +457,6 @@ const LOGO_SURFACE = {
   setespera: { top:37, left:50, w:26, rotateX:10, rotateY:0 },
 }
 
-const CONF_FURNITURE = {
-  restaurante: [
-    { id:'r1', name:'Mesa Rectangular',       cat:'Mesas',  desc:'Tablero melamínico, estructura de acero',        svgType:'mesa' },
-    { id:'r2', name:'Mesa Cuadrada 70×70',    cat:'Mesas',  desc:'Ideal para parejas y espacios compactos',        svgType:'mesacuad' },
-    { id:'r3', name:'Mesa Redonda',           cat:'Mesas',  desc:'Base central, perfecta para ambientes íntimos',  svgType:'mesared' },
-    { id:'r4', name:'Silla con Cojín',        cat:'Sillas', desc:'Tapizado vinílico, fácil de limpiar',            svgType:'silla' },
-    { id:'r5', name:'Silla Apilable',         cat:'Sillas', desc:'Práctica para guardar y reorganizar',            svgType:'sillapil' },
-    { id:'r6', name:'Butaca Lounge',          cat:'Sillas', desc:'Acolchada, para zona de espera o barra',         svgType:'butaca' },
-    { id:'r7', name:'Set Comedor 4 personas', cat:'Sets',   desc:'Mesa + 4 sillas, entregamos armado',             svgType:'set' },
-    { id:'r8', name:'Barra de Atención',      cat:'Barras', desc:'Para caja y despacho, tablero reforzado',        svgType:'barra' },
-  ],
-  bar: [
-    { id:'b1', name:'Mesa Alta para Bar',        cat:'Mesas',  desc:'100–110 cm, para ambiente de bar/lounge',      svgType:'mesaalta' },
-    { id:'b2', name:'Mesa Cuadrada Lounge',      cat:'Mesas',  desc:'Compacta para zonas de copas',                 svgType:'mesacuad' },
-    { id:'b3', name:'Mesa Redonda Lounge',       cat:'Mesas',  desc:'Base central, ideal para grupos',              svgType:'mesared' },
-    { id:'b4', name:'Taburete con Respaldo',     cat:'Sillas', desc:'Altura regulable, para barras altas',          svgType:'taburete' },
-    { id:'b5', name:'Butaca de Lounge',          cat:'Sillas', desc:'Tapizada y cómoda para zonas chill',           svgType:'butaca' },
-    { id:'b6', name:'Barra de Bar a Medida',     cat:'Barras', desc:'Tablero de alto tráfico, estructura metálica', svgType:'barra' },
-    { id:'b7', name:'Barra Isla / Mostrador',    cat:'Barras', desc:'Punto central de atención',                    svgType:'mostrador' },
-    { id:'b8', name:'Set Mesa Alta + Taburetes', cat:'Sets',   desc:'Combinación perfecta para zona de bar',        svgType:'setbar' },
-  ],
-  oficina: [
-    { id:'o1', name:'Mesa de Trabajo',          cat:'Mesas',  desc:'Tablero reforzado, patas regulables',        svgType:'mesa' },
-    { id:'o2', name:'Mesa Conferencia 160×80',  cat:'Mesas',  desc:'Sala de reuniones, hasta 8 personas',        svgType:'mesaconf' },
-    { id:'o3', name:'Mesa Reunión Redonda',     cat:'Mesas',  desc:'Para reuniones rápidas de equipo',           svgType:'mesared' },
-    { id:'o4', name:'Silla Ejecutiva',          cat:'Sillas', desc:'Respaldo alto, base rodante y apoyabrazos',  svgType:'sillejec' },
-    { id:'o5', name:'Silla de Visita Apilable', cat:'Sillas', desc:'Para salas de espera y capacitaciones',      svgType:'sillapil' },
-    { id:'o6', name:'Butaca de Recepción',      cat:'Sillas', desc:'Tapizada, para lobby corporativo',           svgType:'butaca' },
-    { id:'o7', name:'Set Sala de Espera',       cat:'Sets',   desc:'Para recepción y lobby de oficina',          svgType:'setespera' },
-    { id:'o8', name:'Mostrador de Recepción',   cat:'Barras', desc:'Diseño ejecutivo para el ingreso',           svgType:'mostrador' },
-  ],
-  colegio: [
-    { id:'c1', name:'Mesa Cuadrada 70×70',     cat:'Mesas',  desc:'Resistente, ideal para aulas',                svgType:'mesacuad' },
-    { id:'c2', name:'Mesa Rectangular 120×60', cat:'Mesas',  desc:'Comedores y salas de estudio',                svgType:'mesa' },
-    { id:'c3', name:'Mesa Redonda Infantil',   cat:'Mesas',  desc:'Bordes seguros para los más pequeños',        svgType:'mesared' },
-    { id:'c4', name:'Silla Apilable',          cat:'Sillas', desc:'Fácil de almacenar, muy durable',             svgType:'sillapil' },
-    { id:'c5', name:'Silla con Cojín',         cat:'Sillas', desc:'Para salas de profesores y dirección',        svgType:'silla' },
-    { id:'c6', name:'Taburete de Laboratorio', cat:'Sillas', desc:'Para talleres y laboratorios',                svgType:'taburete' },
-    { id:'c7', name:'Set Comedor 6 personas',  cat:'Sets',   desc:'Comedor escolar completo, entregamos armado', svgType:'set' },
-    { id:'c8', name:'Banca de Espera',         cat:'Sets',   desc:'Para pasillos y zonas comunes',               svgType:'setespera' },
-  ],
-  hotel: [
-    { id:'h1', name:'Mostrador de Recepción',   cat:'Barras', desc:'Diseño elegante para el lobby',          svgType:'mostrador' },
-    { id:'h2', name:'Mesa Redonda 4 personas',  cat:'Mesas',  desc:'Para restaurante y salón del hotel',     svgType:'mesared' },
-    { id:'h3', name:'Mesa Conferencia',         cat:'Mesas',  desc:'Salas de eventos y reuniones',           svgType:'mesaconf' },
-    { id:'h4', name:'Mesa Alta de Bar',         cat:'Mesas',  desc:'Para el bar y la terraza',               svgType:'mesaalta' },
-    { id:'h5', name:'Silla Tapizada Ejecutiva', cat:'Sillas', desc:'Para salas de reuniones',                svgType:'silla' },
-    { id:'h6', name:'Butaca de Lobby',          cat:'Sillas', desc:'Confort premium para zonas de descanso', svgType:'butaca' },
-    { id:'h7', name:'Taburete de Bar',          cat:'Sillas', desc:'Para la barra del lounge',               svgType:'taburete' },
-    { id:'h8', name:'Set Sala de Espera',       cat:'Sets',   desc:'Para lobby y zonas de descanso',         svgType:'setespera' },
-  ],
-  cafeteria: [
-    { id:'ca1', name:'Mesa Alta para Bar',       cat:'Mesas',  desc:'Perfecta para café de moda',           svgType:'mesaalta' },
-    { id:'ca2', name:'Mesa Cuadrada 70×70',      cat:'Mesas',  desc:'Para interior del café',               svgType:'mesacuad' },
-    { id:'ca3', name:'Mesa Redonda',             cat:'Mesas',  desc:'Para terraza y ventanal',              svgType:'mesared' },
-    { id:'ca4', name:'Taburete con Respaldo',    cat:'Sillas', desc:'Para zona de barra y mesas altas',     svgType:'taburete' },
-    { id:'ca5', name:'Silla con Cojín',          cat:'Sillas', desc:'Cómoda para estancias largas',         svgType:'silla' },
-    { id:'ca6', name:'Butaca Lounge',            cat:'Sillas', desc:'Para rincón de lectura y café',        svgType:'butaca' },
-    { id:'ca7', name:'Barra Modular a Medida',   cat:'Barras', desc:'Mostrador principal del café',         svgType:'barra' },
-    { id:'ca8', name:'Set Mesa Alta + Taburetes', cat:'Sets',  desc:'Para la zona de barra',                svgType:'setbar' },
-  ],
-  clinica: [
-    { id:'cl1', name:'Silla de Espera',        cat:'Sillas', desc:'Cómoda y durable para sala de espera', svgType:'silla' },
-    { id:'cl2', name:'Butaca de Espera',       cat:'Sillas', desc:'Tapizado lavable, confort superior',   svgType:'butaca' },
-    { id:'cl3', name:'Silla Apilable',         cat:'Sillas', desc:'Para áreas de alta rotación',          svgType:'sillapil' },
-    { id:'cl4', name:'Taburete Médico',        cat:'Sillas', desc:'Giratorio, para consultorios',         svgType:'taburete' },
-    { id:'cl5', name:'Set Sala de Espera',     cat:'Sets',   desc:'Bancas lineales, fáciles de limpiar',  svgType:'setespera' },
-    { id:'cl6', name:'Mostrador de Recepción', cat:'Barras', desc:'Para el área de admisión',             svgType:'mostrador' },
-    { id:'cl7', name:'Mesa de Trabajo',        cat:'Mesas',  desc:'Para consultorios y área de trabajo',  svgType:'mesa' },
-    { id:'cl8', name:'Mesa de Juntas',         cat:'Mesas',  desc:'Para reuniones del personal médico',   svgType:'mesaconf' },
-  ],
-  eventos: [
-    { id:'e1', name:'Set Comedor 6 personas',     cat:'Sets',   desc:'Para banquetes y eventos empresariales', svgType:'set' },
-    { id:'e2', name:'Set Comedor 4 personas',     cat:'Sets',   desc:'Para distribución flexible del espacio', svgType:'set' },
-    { id:'e3', name:'Mesa Rectangular Reforzada', cat:'Mesas',  desc:'Para mesas de banquete y conferencia',   svgType:'mesa' },
-    { id:'e4', name:'Mesa Redonda Banquete',      cat:'Mesas',  desc:'Clásica para bodas y celebraciones',     svgType:'mesared' },
-    { id:'e5', name:'Mesa Alta Cóctel',           cat:'Mesas',  desc:'Para recepciones de pie',                svgType:'mesaalta' },
-    { id:'e6', name:'Silla Apilable Premium',     cat:'Sillas', desc:'Fácil de almacenar entre eventos',       svgType:'sillapil' },
-    { id:'e7', name:'Silla Tiffany Tapizada',     cat:'Sillas', desc:'Elegante para eventos formales',         svgType:'silla' },
-    { id:'e8', name:'Set Mesa Alta + Taburetes',  cat:'Sets',   desc:'Para zona de cóctel y barra',            svgType:'setbar' },
-  ],
-}
-
 const WHY = [
   { icon: ShieldCheck, title: 'Calidad garantizada',    desc: 'Materiales seleccionados y soldadura reforzada para uso comercial e institucional intensivo.' },
   { icon: BadgeCheck,  title: 'Fábrica propia',         desc: 'Todo fabricado en Villa El Salvador. Sin intermediarios — precio directo al cliente.' },
@@ -538,7 +475,7 @@ const GALLERY = [
 const PRIVACY = `POLÍTICA DE PRIVACIDAD — Industrias Korbax\n\nAl completar el formulario, Industrias Korbax recopila únicamente los datos necesarios para responder tu consulta (nombre, teléfono, empresa y mensaje). Estos datos no se comparten con terceros ni se usan con fines comerciales adicionales.\n\nConforme a la Ley N.° 29733 (Ley de Protección de Datos Personales del Perú), tienes derecho a acceder, rectificar, cancelar u oponerte al tratamiento de tus datos. Escríbenos a: ${EMAIL}`
 const TERMS   = `TÉRMINOS DE USO — Industrias Korbax\n\nEste sitio web es de carácter informativo y comercial. Los precios y disponibilidad están sujetos a cambio sin previo aviso. Las cotizaciones no constituyen una oferta vinculante hasta su confirmación por escrito.\n\nIndustrias Korbax no se hace responsable por el uso indebido de la información publicada. El contenido es propiedad de Industrias Korbax y no puede reproducirse sin autorización.`
 
-const NAV_LINKS   = [{ label:'Catálogo', href:'#/catalogo', route:'catalogo' }, { label:'Configurador', href:'#/configurador', route:'configurador' }, { label:'Galería', href:'#/galeria', route:'galeria' }, { label:'Nosotros', href:'#/nosotros', route:'nosotros' }, { label:'Contacto', href:'#/contacto', route:'contacto' }]
+const NAV_LINKS   = [{ label:'Arquitecto IA', href:'#/arquitecto', route:'arquitecto' }, { label:'Catálogo', href:'#/catalogo', route:'catalogo' }, { label:'Modelos 3D', href:'#/configurador', route:'configurador' }, { label:'Galería', href:'#/galeria', route:'galeria' }, { label:'Nosotros', href:'#/nosotros', route:'nosotros' }, { label:'Contacto', href:'#/contacto', route:'contacto' }]
 const CAT_TABS    = ['Todos', ...new Set(PRODUCTS.map(p => p.tag))]
 const MARQUEE_ROW1 = [...SECTORS, ...SECTORS]
 const MARQUEE_ROW2 = [...SECTORS.slice(4), ...SECTORS, ...SECTORS.slice(0, 4), ...SECTORS]
@@ -642,8 +579,8 @@ function WhatsAppFAB() {
   useEffect(() => { const t = setTimeout(() => setVisible(true), 2200); return () => clearTimeout(t) }, [])
   return (
     <a href={wa(DEFAULT_MSG)} target="_blank" rel="noopener noreferrer"
-      className={`wa-fab-btn fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl ${visible ? 'wa-fab-visible' : ''}`}
-      style={{ background: '#25D366' }} aria-label="Contactar por WhatsApp">
+      className={`wa-fab-btn fixed bottom-7 sm:bottom-8 right-5 sm:right-6 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl ${visible ? 'wa-fab-visible' : ''}`}
+      style={{ background: '#25D366', border: '3px solid rgba(255,255,255,0.9)' }} aria-label="Contactar por WhatsApp">
       <span className="absolute inset-0 rounded-full wa-ping" style={{ background: '#25D366' }} />
       <span className="relative z-10 text-white flex items-center justify-center"><WhatsAppIcon size={26} /></span>
     </a>
@@ -773,31 +710,18 @@ function GalleryCard({ item }) {
   )
 }
 
-/* ════════════════ PRICE TAG (precio "desde" referencial, con descuento) ════════════════ */
+/* ════════════════ PRICE TAG (precio "desde" referencial) ════════════════ */
 function PriceTag({ value, size = 'md' }) {
   const C = useContext(ThemeCtx)
   if (!value) return null
   const big = size === 'md'
-  // Precio "antes" ≈ 30% más alto, redondeado a número limpio (acabado en 0/5)
-  const before = Math.round((value / 0.7) / 5) * 5
-  const off = Math.round((1 - value / before) * 100)
   return (
-    <div className="flex flex-col gap-0.5">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-nunito line-through" style={{ color: C.mist, fontSize: big ? '0.8rem' : '0.7rem' }}>
-          S/ {before.toLocaleString('es-PE')}
-        </span>
-        <span className="font-nunito font-black rounded-full px-2 py-0.5" style={{ background: '#E11D48', color: '#fff', fontSize: big ? '0.62rem' : '0.56rem' }}>
-          -{off}%
-        </span>
-      </div>
-      <div className="flex items-baseline gap-1.5 flex-wrap">
-        <span className="font-nunito font-bold uppercase tracking-wide" style={{ color: C.stone, fontSize: big ? '0.7rem' : '0.62rem' }}>Desde</span>
-        <span className="font-outfit font-black leading-none" style={{ color: C.carbon, fontSize: big ? '1.5rem' : '1.15rem' }}>
-          S/ {value.toLocaleString('es-PE')}
-        </span>
-        <span className="font-nunito" style={{ color: C.mist, fontSize: big ? '0.66rem' : '0.6rem' }}>ref. + IGV</span>
-      </div>
+    <div className="flex items-baseline gap-1.5 flex-wrap">
+      <span className="font-nunito font-bold uppercase tracking-wide" style={{ color: C.stone, fontSize: big ? '0.7rem' : '0.62rem' }}>Desde</span>
+      <span className="font-outfit font-black leading-none" style={{ color: C.carbon, fontSize: big ? '1.5rem' : '1.15rem' }}>
+        S/ {value.toLocaleString('es-PE')}
+      </span>
+      <span className="font-nunito" style={{ color: C.mist, fontSize: big ? '0.66rem' : '0.6rem' }}>ref. + IGV</span>
     </div>
   )
 }
@@ -1449,20 +1373,26 @@ function RoomScene({ model, accent, wood, steel, logo, placement, estType }) {
 }
 
 /* ════════════════ AR MODAL (Realidad Aumentada con model-viewer) ════════════════ */
-function ARModal({ model, logo, finish, placement, onClose }) {
+function ARModal({ model, logo, finish, placement, onClose, srcUrl }) {
   const C = useContext(ThemeCtx)
-  const src = asset(arModelFor(model.svgType))
+  const src = srcUrl || asset(arModelFor(model.svgType))
   const mvRef = useRef(null)
-  const logoPbrRef = useRef(null)
+  const logoMatsRef = useRef({})       // { key: pbr } — una o varias superficies de logo
   const debRef = useRef(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
   const [ready,   setReady]   = useState(false)
-  // controles del logo (en vivo sobre el modelo 3D)
-  const [lx,   setLx]   = useState(placement?.x ?? 50)
-  const [ly,   setLy]   = useState(placement?.y ?? 45)
-  const [lsc,  setLsc]  = useState(placement?.scale ?? 1)
-  const [lrot, setLrot] = useState(placement?.rotate ?? 0)
+  // controles del logo — independientes por superficie (mesa / silla / logo)
+  const TARGET_LABELS = { logo: 'Logo', mesa: 'Mesa', silla: 'Silla' }
+  const logoKey = (name) => { const s = (name || '').slice(4).toLowerCase(); return s || 'logo' }
+  const [targets, setTargets] = useState([])     // [{key,label}]
+  const [target,  setTarget]  = useState('logo') // superficie en edición
+  const [lp, setLp] = useState({})               // { key: {x,y,scale,rotate} }
+  const cur = lp[target] || { x: placement?.x ?? 50, y: placement?.y ?? 45, scale: placement?.scale ?? 1, rotate: placement?.rotate ?? 0 }
+  const setCur = (patch) => setLp(prev => ({ ...prev, [target]: { ...(prev[target] || { x: placement?.x ?? 50, y: placement?.y ?? 45, scale: placement?.scale ?? 1, rotate: placement?.rotate ?? 0 }), ...patch } }))
+
+  // carga model-viewer bajo demanda (solo al abrir el AR)
+  useEffect(() => { ensureModelViewer().catch(() => setError(true)) }, [])
 
   useEffect(() => {
     const el = mvRef.current
@@ -1476,10 +1406,17 @@ function ARModal({ model, logo, finish, placement, onClose }) {
           if (n === 'fabric')    pbr.setBaseColorFactor([...hexToLinear(finish?.uph   || FCOL.wood),  1])
           else if (n === 'legs') pbr.setBaseColorFactor([...hexToLinear(finish?.steel || FCOL.steel), 1])
           else if (n === 'wood') pbr.setBaseColorFactor([...hexToLinear(finish?.wood  || FCOL.wood),  1])
-          else if (n === 'logo') {
-            logoPbrRef.current = pbr
+          else if (n.startsWith('logo')) {
+            const k = logoKey(m.name)
+            logoMatsRef.current[k] = pbr
             if (!logo) pbr.setBaseColorFactor([1, 1, 1, 0]) // sin logo → superficie limpia
           }
+        }
+        const keys = Object.keys(logoMatsRef.current)
+        if (keys.length) {
+          setTargets(keys.map(k => ({ key: k, label: TARGET_LABELS[k] || k })))
+          setTarget(t => (keys.includes(t) ? t : keys[0]))
+          setLp(prev => { const o = { ...prev }; for (const k of keys) if (!o[k]) o[k] = { x: placement?.x ?? 50, y: placement?.y ?? 45, scale: placement?.scale ?? 1, rotate: placement?.rotate ?? 0 }; return o })
         }
       } catch { /* API no disponible */ }
       setReady(true)
@@ -1492,20 +1429,23 @@ function ARModal({ model, logo, finish, placement, onClose }) {
     return () => { el.removeEventListener('load', onLoad); el.removeEventListener('error', onErr) }
   }, [])
 
-  // Recompone y aplica el logo en vivo cuando cambian los controles (con pequeño debounce)
+  // Recompone y aplica el logo de cada superficie en vivo (independiente) con pequeño debounce
   useEffect(() => {
-    if (!ready || !logo || !logoPbrRef.current) return
+    if (!ready || !logo) return
     clearTimeout(debRef.current)
     debRef.current = setTimeout(async () => {
-      try {
-        const url = await composeLogoTexture(logo, { x: lx, y: ly, scale: lsc, rotate: lrot }, arLogoAspect(model.svgType), arLogoRound(model.svgType))
-        const tex = await mvRef.current.createTexture(url)
-        logoPbrRef.current.baseColorTexture.setTexture(tex)
-        logoPbrRef.current.setBaseColorFactor([1, 1, 1, 1])
-      } catch { /* noop */ }
+      for (const k of Object.keys(logoMatsRef.current)) {
+        const p = lp[k]; if (!p) continue
+        try {
+          const url = await composeLogoTexture(logo, p, srcUrl ? 1 : arLogoAspect(model.svgType), srcUrl ? false : arLogoRound(model.svgType))
+          const tex = await mvRef.current.createTexture(url)
+          logoMatsRef.current[k].baseColorTexture.setTexture(tex)
+          logoMatsRef.current[k].setBaseColorFactor([1, 1, 1, 1])
+        } catch { /* noop */ }
+      }
     }, 110)
     return () => clearTimeout(debRef.current)
-  }, [ready, lx, ly, lsc, lrot])
+  }, [ready, lp])
 
   return (
     <div className="fixed inset-0 z-[70] flex flex-col" style={{ background: '#0d0d0f' }}
@@ -1532,18 +1472,18 @@ function ARModal({ model, logo, finish, placement, onClose }) {
           disable-pan="true"
           auto-rotate="true"
           interaction-prompt="none"
-          min-camera-orbit="auto auto 50%"
-          max-camera-orbit="auto auto 150%"
+          min-camera-orbit="auto auto 45%"
+          max-camera-orbit="auto 100deg 170%"
           touch-action="pan-y"
           environment-image="neutral"
-          tone-mapping="neutral"
-          shadow-intensity="1"
-          shadow-softness="1"
-          exposure="1.3"
+          tone-mapping="commerce"
+          shadow-intensity="1.9"
+          shadow-softness="0.55"
+          exposure="1.05"
           loading="eager"
           reveal="auto"
           alt={model.name}
-          style={{ width: '100%', height: '100%', background: 'radial-gradient(circle at 50% 40%, #f3efe9 0%, #e7e0d6 60%, #d8cfc1 100%)' }}>
+          style={{ width: '100%', height: '100%', background: 'radial-gradient(circle at 50% 32%, #fbfcfd 0%, #eaeef1 55%, #d2d8dd 100%)' }}>
           {/* botón AR (solo aparece en dispositivos con soporte AR) */}
           <button slot="ar-button"
             className="absolute bottom-24 left-1/2 -translate-x-1/2 inline-flex items-center gap-2 px-5 py-3 rounded-full font-nunito font-extrabold text-sm shadow-xl active:scale-95"
@@ -1555,35 +1495,68 @@ function ARModal({ model, logo, finish, placement, onClose }) {
         {/* overlay de carga / error (encima del visor) */}
         {loading && !error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none"
-            style={{ background: 'radial-gradient(circle at 50% 40%, #f3efe9 0%, #e7e0d6 100%)' }}>
+            style={{ background: 'radial-gradient(circle at 50% 40%, #fbfcfd 0%, #eaeef1 100%)' }}>
             <div className="w-10 h-10 rounded-full border-4 animate-spin" style={{ borderColor: `${C.sand}40`, borderTopColor: C.sand }} />
             <p className="font-nunito font-bold text-sm" style={{ color: C.petrol }}>Cargando modelo 3D…</p>
           </div>
         )}
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center"
-            style={{ background: 'radial-gradient(circle at 50% 40%, #f3efe9 0%, #e7e0d6 100%)' }}>
+            style={{ background: 'radial-gradient(circle at 50% 40%, #fbfcfd 0%, #eaeef1 100%)' }}>
             <p className="font-outfit font-black text-base" style={{ color: C.carbon }}>No se pudo cargar el modelo 3D</p>
             <p className="font-nunito text-xs" style={{ color: C.stone }}>Revisa tu conexión a internet e inténtalo de nuevo.</p>
           </div>
         )}
       </div>
 
-      {/* controles del logo (en vivo) */}
-      {logo && (
-        <div className="px-4 py-3 shrink-0 overflow-y-auto" style={{ background: C.ivory, maxHeight: '34vh' }}>
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-nunito font-bold uppercase tracking-wide" style={{ color: C.carbon }}>Ajustar logo</p>
-            <button onClick={() => { setLx(50); setLy(45); setLsc(1); setLrot(0) }}
+      {/* controles del logo (en vivo) — por superficie independiente */}
+      {logo && targets.length > 0 && (
+        <div className="px-4 py-3 shrink-0 overflow-y-auto" style={{ background: C.ivory, maxHeight: '38vh' }}>
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-xs font-nunito font-bold uppercase tracking-wide" style={{ color: C.carbon }}>Ajustar logo</p>
+              {targets.length > 1 && targets.map(t => (
+                <button key={t.key} onClick={() => setTarget(t.key)}
+                  className="text-[11px] font-nunito font-bold px-3 py-1 rounded-full border transition-all duration-200"
+                  style={{ background: target === t.key ? C.sand : 'transparent', color: target === t.key ? C.petrol : C.stone, borderColor: target === t.key ? C.sand : C.border }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setCur({ x: 50, y: 45, scale: 1, rotate: 0 })}
               className="flex items-center gap-1 text-[11px] font-nunito font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: C.border, color: C.stone }}>
               <RotateCcw size={12} /> Centrar
             </button>
           </div>
+          {targets.length > 1 && (
+            <p className="text-[11px] font-nunito mb-2" style={{ color: C.stone }}>
+              Editando el logo de <strong style={{ color: C.carbon }}>{TARGET_LABELS[target] || target}</strong> — cada superficie se mueve por separado.
+            </p>
+          )}
+          {/* Posición rápida (cuadrícula 3×3: esquinas, bordes y centro) */}
+          <div className="flex items-center gap-3 mb-3">
+            <div className="grid grid-cols-3 gap-1 shrink-0" style={{ width: 84 }}>
+              {[[16, 16], [50, 16], [84, 16], [16, 50], [50, 50], [84, 50], [16, 84], [50, 84], [84, 84]].map(([x, y], i) => {
+                const on = Math.abs(cur.x - x) < 7 && Math.abs(cur.y - y) < 7
+                return (
+                  <button key={i} onClick={() => setCur({ x, y })} aria-label="Posición del logo"
+                    className="h-6 rounded-md border flex items-center justify-center transition-all duration-150"
+                    style={{ borderColor: on ? C.sand : C.border, background: on ? `${C.sand}22` : 'transparent' }}>
+                    <span style={{ width: 5, height: 5, borderRadius: 99, background: on ? C.sand : C.stone, display: 'inline-block', opacity: on ? 1 : 0.55 }} />
+                  </button>
+                )
+              })}
+            </div>
+            <div>
+              <p className="text-[11px] font-nunito font-bold" style={{ color: C.carbon }}>Posición rápida</p>
+              <p className="text-[11px] font-nunito leading-snug" style={{ color: C.stone }}>Toca una esquina, borde o el centro para colocar el logo al instante.</p>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-x-4">
-            <EditorSlider accent={C.sand} label="Posición ←→" val={lx}   set={setLx}   min={0} max={100} step={1}    fmt={`${Math.round(lx)}%`} />
-            <EditorSlider accent={C.sand} label="Posición ↕"  val={ly}   set={setLy}   min={0} max={100} step={1}    fmt={`${Math.round(ly)}%`} />
-            <EditorSlider accent={C.sand} label="Tamaño"      val={lsc}  set={setLsc}  min={0.3} max={2.4} step={0.05} fmt={`${Math.round(lsc * 100)}%`} />
-            <EditorSlider accent={C.sand} label="Giro"        val={lrot} set={setLrot} min={-180} max={180} step={1}   fmt={`${Math.round(lrot)}°`} />
+            <EditorSlider accent={C.sand} label="Posición ←→" val={cur.x}      set={v => setCur({ x: v })}      min={0} max={100} step={1}    fmt={`${Math.round(cur.x)}%`} />
+            <EditorSlider accent={C.sand} label="Posición ↕"  val={cur.y}      set={v => setCur({ y: v })}      min={0} max={100} step={1}    fmt={`${Math.round(cur.y)}%`} />
+            <EditorSlider accent={C.sand} label="Tamaño"      val={cur.scale}  set={v => setCur({ scale: v })}  min={0.3} max={2.4} step={0.05} fmt={`${Math.round(cur.scale * 100)}%`} />
+            <EditorSlider accent={C.sand} label="Giro"        val={cur.rotate} set={v => setCur({ rotate: v })} min={-180} max={180} step={1}   fmt={`${Math.round(cur.rotate)}°`} />
           </div>
         </div>
       )}
@@ -1947,10 +1920,27 @@ function LogoPlacerModal({ model, accent, logo, placement, finish, onSave, onClo
   )
 }
 
-/* ════════════════ CONFIGURADOR (sección) ════════════════ */
+/* ════════════════ MODELOS 3D (sección) ════════════════ */
+// Galería de modelos 3D para personalizar (1 por cada svgType de FurnitureSVG)
+const MODELOS_3D = [
+  { id:'silla',     name:'Silla con Cojín',        cat:'Sillas', svgType:'silla',     color:'#E85D5D' },
+  { id:'sillapil',  name:'Silla Apilable',         cat:'Sillas', svgType:'sillapil',  color:'#3B82F6' },
+  { id:'sillejec',  name:'Silla Ejecutiva',        cat:'Sillas', svgType:'sillejec',  color:'#7C5CBF' },
+  { id:'butaca',    name:'Butaca Lounge',          cat:'Sillas', svgType:'butaca',    color:'#EC4899' },
+  { id:'taburete',  name:'Taburete con Respaldo',  cat:'Sillas', svgType:'taburete',  color:'#0EA5E9' },
+  { id:'mesa',      name:'Mesa Rectangular',       cat:'Mesas',  svgType:'mesa',      color:'#10B981' },
+  { id:'mesacuad',  name:'Mesa Cuadrada',          cat:'Mesas',  svgType:'mesacuad',  color:'#F59E0B' },
+  { id:'mesared',   name:'Mesa Redonda',           cat:'Mesas',  svgType:'mesared',   color:'#E85D5D' },
+  { id:'mesaalta',  name:'Mesa Alta de Bar',       cat:'Mesas',  svgType:'mesaalta',  color:'#7C5CBF' },
+  { id:'mesaconf',  name:'Mesa de Conferencia',    cat:'Mesas',  svgType:'mesaconf',  color:'#3B82F6' },
+  { id:'barra',     name:'Barra de Bar',           cat:'Barras', svgType:'barra',     color:'#92400E' },
+  { id:'mostrador', name:'Mostrador / Recepción',  cat:'Barras', svgType:'mostrador', color:'#0EA5E9' },
+  { id:'set',       name:'Set Comedor',            cat:'Sets',   svgType:'set',       color:'#E85D5D' },
+  { id:'setbar',    name:'Set Mesa Alta + Taburetes', cat:'Sets', svgType:'setbar',  color:'#F59E0B' },
+  { id:'setespera', name:'Set Sala de Espera',     cat:'Sets',   svgType:'setespera', color:'#10B981' },
+]
 function ConfiguradorSection() {
   const C = useContext(ThemeCtx)
-  const [estType,    setEstType]    = useState(null)
   const [logo,       setLogo]       = useState(null)
   const [placements, setPlacements] = useState({})   // { [modelId]: {x,y,scale,tilt,rotate} }
   const [finishes,   setFinishes]   = useState({})   // { [modelId]: {wood,steel,uph} }
@@ -1958,7 +1948,8 @@ function ConfiguradorSection() {
   const { qtyOf, add, inc, dec, totalQty, setOpen } = useCart()
   const fileRef = useRef(null)
 
-  const models = estType ? CONF_FURNITURE[estType.id] : []
+  const models = MODELOS_3D
+  const AMB = 'restaurante'  // ambiente por defecto para la vista "ver en mi local"
   const ckey = (id) => `conf-${id}`
 
   const handleFile = (file) => {
@@ -1972,19 +1963,20 @@ function ConfiguradorSection() {
 
   useEffect(() => () => { if (logo) URL.revokeObjectURL(logo) }, [])
 
-  const changeType = (type) => setEstType(type)
-
   return (
     <section id="configurador" className="py-16 sm:py-20 px-4 sm:px-6 scroll-mt-16" style={{ background: C.gray }}>
 
       {/* Encabezado de sección */}
       <div className="max-w-6xl mx-auto text-center mb-12 fade-up">
-        <SectionLabel>Configurador 3D</SectionLabel>
+        <SectionLabel>Modelos 3D</SectionLabel>
         <h2 className="font-outfit font-black uppercase leading-none mb-3" style={{ fontSize: 'clamp(2rem,5vw,3.5rem)', color: C.carbon }}>
-          Diseña tu local con tu marca
+          Personaliza tu mueble a tu marca
         </h2>
         <p className="font-nunito text-sm sm:text-base max-w-2xl mx-auto" style={{ color: C.stone }}>
-          Elige tu tipo de negocio, sube tu logo y míralo aplicado en cada mueble. Ajusta cantidades y cotiza tu pedido directo por WhatsApp.
+          Elige un modelo, dale tus colores y materiales, coloca tu logo y míralo en 3D y Realidad Aumentada.
+        </p>
+        <p className="font-nunito text-xs sm:text-sm mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ color: C.stone, background: `${C.sand}14` }}>
+          💡 Ideal si <strong style={{ color: C.carbon }}>ya sabes el mueble</strong> y quieres verlo con tu marca.
         </p>
       </div>
 
@@ -1992,38 +1984,10 @@ function ConfiguradorSection() {
       <div>
         <div className="max-w-6xl mx-auto">
 
-          {/* Paso 1: Tipo de local */}
-          <div className="mb-10">
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-7 h-7 rounded-full flex items-center justify-center font-outfit font-black text-xs shrink-0" style={{ background: C.sand, color: C.petrol }}>1</div>
-              <h2 className="font-outfit font-black text-xl uppercase" style={{ color: C.carbon }}>¿Qué tipo de local es?</h2>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {EST_TYPES.map(type => {
-                const Icon = type.icon
-                const active = estType?.id === type.id
-                return (
-                  <button key={type.id} onClick={() => changeType(type)}
-                    className="flex flex-col items-center gap-2.5 p-4 rounded-2xl border-2 transition-all duration-200 active:scale-[0.97]"
-                    style={{ background: active ? `${type.color}12` : C.ivory, borderColor: active ? type.color : C.border,
-                             boxShadow: active ? `0 4px 20px ${type.color}22` : 'none' }}>
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-200"
-                      style={{ background: active ? type.color : `${type.color}15` }}>
-                      <Icon size={22} style={{ color: active ? '#fff' : type.color }} />
-                    </div>
-                    <span className="font-nunito font-bold text-sm text-center leading-tight" style={{ color: C.carbon }}>{type.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {estType && (
-            <>
-              {/* Paso 2: Logo */}
+          {/* Paso 1: Logo (opcional) */}
               <div className="mb-10">
                 <div className="flex items-center gap-3 mb-5">
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center font-outfit font-black text-xs shrink-0" style={{ background: C.sand, color: C.petrol }}>2</div>
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center font-outfit font-black text-xs shrink-0" style={{ background: C.sand, color: C.petrol }}>1</div>
                   <h2 className="font-outfit font-black text-xl uppercase" style={{ color: C.carbon }}>
                     Tu logo{' '}
                     <span className="text-sm font-nunito normal-case font-normal" style={{ color: C.stone }}>(opcional — se verá en los muebles)</span>
@@ -2046,7 +2010,7 @@ function ConfiguradorSection() {
                           </div>
                           <div className="text-center">
                             <p className="font-nunito font-bold text-sm" style={{ color: C.carbon }}>Arrastra o haz clic aquí</p>
-                            <p className="text-xs font-nunito mt-0.5" style={{ color: C.stone }}>PNG · JPG · SVG — se mostrará en tus muebles</p>
+                            <p className="text-xs font-nunito mt-0.5" style={{ color: C.stone }}>PNG · JPG · SVG · <strong style={{ color: C.sand }}>PNG con fondo transparente se ve mejor</strong></p>
                           </div>
                         </>
                     }
@@ -2080,14 +2044,12 @@ function ConfiguradorSection() {
                 </div>
               </div>
 
-              {/* Paso 3: Modelos 3D */}
+              {/* Paso 2: Modelos 3D */}
               <div className="mb-2">
                 <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center font-outfit font-black text-xs shrink-0" style={{ background: C.sand, color: C.petrol }}>3</div>
-                    <h2 className="font-outfit font-black text-xl uppercase" style={{ color: C.carbon }}>
-                      Modelos para <span style={{ color: estType.color }}>{estType.label}</span>
-                    </h2>
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center font-outfit font-black text-xs shrink-0" style={{ background: C.sand, color: C.petrol }}>2</div>
+                    <h2 className="font-outfit font-black text-xl uppercase" style={{ color: C.carbon }}>Elige y personaliza tu modelo</h2>
                   </div>
                   {totalQty > 0 && (
                     <span className="text-sm font-nunito font-bold px-3 py-1.5 rounded-full" style={{ background: `${C.sand}20`, color: C.sandDim }}>
@@ -2100,7 +2062,7 @@ function ConfiguradorSection() {
                 </p>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   {models.map(model => (
-                    <FurnitureCard3D key={model.id} model={model} logo={logo} accent={estType.color}
+                    <FurnitureCard3D key={model.id} model={model} logo={logo} accent={model.color}
                       placement={placements[model.id]} finish={finishes[model.id]}
                       onEditLogo={() => setEditModel(model)}
                       qty={qtyOf(ckey(model.id))}
@@ -2110,33 +2072,18 @@ function ConfiguradorSection() {
                   ))}
                 </div>
               </div>
-            </>
-          )}
-
-          {!estType && (
-            <div className="text-center py-20">
-              <div className="w-20 h-20 mx-auto rounded-3xl flex items-center justify-center mb-5" style={{ background: `${C.sand}18` }}>
-                <Sparkles size={32} style={{ color: C.sand }} />
-              </div>
-              <p className="font-outfit font-black text-2xl uppercase mb-2" style={{ color: C.carbon }}>Elige tu tipo de local</p>
-              <p className="text-sm font-nunito max-w-sm mx-auto" style={{ color: C.stone }}>
-                Selecciona arriba y verás los muebles perfectos para tu negocio en 3D — con tu logo aplicado.
-              </p>
-            </div>
-          )}
         </div>
       </div>
 
       {/* Barra de pedido (sticky dentro de la sección) */}
-      {estType && (
-        <div className="sticky bottom-4 z-30 max-w-6xl mx-auto mt-8 px-1">
+      <div className="sticky bottom-4 z-30 max-w-6xl mx-auto mt-8 px-1">
           <div className="rounded-2xl shadow-xl border flex items-center justify-between gap-4 flex-wrap px-5 py-4"
             style={{ background: C.ivory, borderColor: C.border }}>
             <div>
               <p className="font-nunito font-extrabold text-sm" style={{ color: C.carbon }}>
                 {totalQty > 0
                   ? `${totalQty} pieza${totalQty !== 1 ? 's' : ''} en tu pedido`
-                  : `Arma tu pedido para ${estType.label}`}
+                  : 'Arma tu pedido de mobiliario'}
               </p>
               <p className="text-xs font-nunito" style={{ color: C.stone }}>
                 {totalQty > 0 ? 'Tu pedido se guarda aunque cambies de página' : 'Agrega modelos con “Agregar al pedido”'}
@@ -2144,17 +2091,16 @@ function ConfiguradorSection() {
             </div>
             {totalQty > 0
               ? <SandBtn onClick={() => setOpen(true)} size="lg" className="shadow-lg"><ShoppingBag size={18} /> Ver pedido y cotizar</SandBtn>
-              : <SandBtn href={wa(`Hola, quiero cotizar mobiliario para mi ${estType.label}.`)} size="lg" className="shadow-lg"><MessageCircle size={18} /> Cotizar por WhatsApp</SandBtn>}
+              : <SandBtn href={wa('Hola, quiero cotizar mobiliario para mi empresa.')} size="lg" className="shadow-lg"><MessageCircle size={18} /> Cotizar por WhatsApp</SandBtn>}
           </div>
         </div>
-      )}
 
       {/* Editor de logo por mueble */}
       {editModel && (
         <LogoPlacerModal
           model={editModel}
-          accent={estType.color}
-          estType={estType.id}
+          accent={editModel.color}
+          estType={AMB}
           logo={logo}
           placement={placements[editModel.id]}
           finish={finishes[editModel.id]}
@@ -2298,9 +2244,501 @@ function ContactForm({ onOpenPrivacy }) {
 
 /* ════════════════ APP ════════════════ */
 /* ════════════════ NAVEGACIÓN MULTIPÁGINA ════════════════ */
+/* ── Arquitecto Korbax: motor de reglas (sin IA de pago, 100% en el navegador) ── */
+const CAT_BY_ID = Object.values(CATALOG).flat().reduce((m, it) => { m[it.id] = it; return m }, {})
+// m² por persona (incluye circulación) para validar el aforo contra el área
+const ARQ_AREA  = { restaurante:1.5, bar:1.2, oficina:5, colegio:1.8, hotel:1.6, cafeteria:1.4, clinica:1.5, eventos:1.0 }
+// Silla por rubro y nivel de acabado → distinta en modelo, precio y aspecto
+const ARQ_CHAIR_TIER = {
+  restaurante: { economico:'s1', estandar:'s2', premium:'s6' },
+  cafeteria:   { economico:'s1', estandar:'s2', premium:'s6' },
+  bar:         { economico:'s3', estandar:'s3', premium:'s3' },
+  oficina:     { economico:'s1', estandar:'s4', premium:'s5' },
+  colegio:     { economico:'s1', estandar:'s1', premium:'s2' },
+  hotel:       { economico:'s2', estandar:'s4', premium:'s5' },
+  clinica:     { economico:'s4', estandar:'s4', premium:'s5' },
+  eventos:     { economico:'s1', estandar:'s1', premium:'s2' },
+}
+const ARQ_ACABADO = {
+  economico: 'Sillas apilables y mesas melamínicas — máxima resistencia al mejor precio.',
+  estandar:  'Sillas con cojín y mesas reforzadas — el equilibrio ideal calidad/precio.',
+  premium:   'Sillas tapizadas/de madera y mesas redondas — imagen de alta gama.',
+}
+const ARQ_ESTILOS = [
+  { id:'economico', label:'Económico' },
+  { id:'estandar',  label:'Estándar'  },
+  { id:'premium',   label:'Premium'   },
+]
+// Cada rubro → función(personas, estilo) que devuelve líneas {id de catálogo, cantidad, motivo}
+const ARQ_RECIPES = {
+  restaurante: (p, e, chair) => {
+    const prem = e === 'premium'
+    const mesas = Math.ceil(p / 4)
+    const r = [
+      { id: prem ? 'm4' : 'm1', qty:mesas, motivo: prem ? 'Mesa redonda elegante, 1 por cada 4 comensales' : '1 mesa cuadrada por cada 4 comensales' },
+      { id:chair, qty:mesas * 4, motivo:'4 sillas por mesa' },
+    ]
+    if (p >= 20) r.push({ id:'b1', qty:1, motivo:'Barra para caja y despacho' })
+    return r
+  },
+  cafeteria: (p, e, chair) => {
+    const prem = e === 'premium'
+    const mesas = Math.ceil(p / 3)
+    return [
+      { id: prem ? 'm4' : 'm1', qty:mesas, motivo: prem ? 'Mesa redonda, 1 por cada ~3 personas' : '1 mesa por cada ~3 personas' },
+      { id:chair, qty:mesas * 3, motivo:'3 sillas por mesa' },
+      { id:'b1', qty:1, motivo:'Barra de atención y despacho' },
+    ]
+  },
+  bar: (p, e, chair) => {
+    const mesas = Math.ceil(p / 3)
+    return [
+      { id:'m5', qty:mesas, motivo:'1 mesa alta por cada ~3 personas' },
+      { id:chair, qty:mesas * 3, motivo:'3 taburetes por mesa alta' },
+      { id:'b1', qty:1, motivo:'Barra de bar a medida' },
+    ]
+  },
+  oficina: (p, e, chair) => {
+    const reunion = p >= 4
+    const r = [
+      { id:'m6', qty:p, motivo:'1 puesto de trabajo por persona' },
+      { id:chair, qty:p + (reunion ? 6 : 0), motivo: reunion ? 'Sillas para puestos + sala de reuniones' : '1 silla por puesto' },
+    ]
+    if (reunion) r.push({ id:'m3', qty:1, motivo:'Mesa para la sala de reuniones' })
+    r.push({ id:'b2', qty:1, motivo:'Mostrador de recepción' })
+    return r
+  },
+  colegio: (p, e, chair) => [
+    { id:'m2', qty:Math.ceil(p / 2), motivo:'1 mesa rectangular cada 2 alumnos' },
+    { id:chair, qty:p, motivo:'1 silla por alumno' },
+  ],
+  hotel: (p, e, chair) => [
+    { id:'c2', qty:Math.ceil(p / 6), motivo:'1 set comedor (6 personas) por grupo' },
+    { id:chair, qty:4, motivo:'Sillas de espera para el lobby' },
+    { id:'b2', qty:1, motivo:'Mostrador de recepción' },
+  ],
+  clinica: (p, e, chair) => [
+    { id:chair, qty:p, motivo:'1 silla de espera por paciente en sala' },
+    { id:'m4', qty:Math.max(1, Math.ceil(p / 8)), motivo:'Mesa auxiliar para la sala de espera' },
+    { id:'b2', qty:1, motivo:'Mostrador de recepción' },
+  ],
+  eventos: (p, e, chair) => [
+    { id:'m3', qty:Math.ceil(p / 8), motivo:'1 mesa larga (8 personas) por grupo' },
+    { id:chair, qty:p, motivo:'1 silla por asistente' },
+  ],
+}
+function arqPlan(rubroId, personas, estilo) {
+  const fn = ARQ_RECIPES[rubroId]
+  if (!fn || personas <= 0) return null
+  const chair = (ARQ_CHAIR_TIER[rubroId] || {})[estilo] || 's2'
+  const merged = {}
+  for (const ln of fn(personas, estilo, chair)) {
+    if (!ln.qty || ln.qty <= 0) continue
+    const it = CAT_BY_ID[ln.id]; if (!it) continue
+    if (merged[ln.id]) merged[ln.id].qty += ln.qty
+    else merged[ln.id] = { id:ln.id, name:it.name, price:it.price, qty:ln.qty, motivo:ln.motivo }
+  }
+  const items = Object.values(merged)
+  return { items, total: items.reduce((a, it) => a + it.price * it.qty, 0) }
+}
+
+// id de catálogo → modelo 3D (svgType de FurnitureSVG)
+const ARQ_SVG = { m1:'mesacuad', m2:'mesa', m3:'mesaconf', m4:'mesared', m5:'mesaalta', m6:'mesa', s1:'sillapil', s2:'silla', s3:'taburete', s4:'butaca', s5:'sillejec', s6:'silla', c1:'set', c2:'set', c3:'setespera', b1:'barra', b2:'mostrador', b3:'barra' }
+const ARQ_TABLE_IDS = new Set(['m1','m2','m3','m4','m5','m6','c1','c2','c3'])
+const ARQ_BAR_IDS   = new Set(['b1','b2','b3'])
+// forma de mesa en el plano: square | rect | round | high | set
+const ARQ_SHAPE = { m1:'square', m2:'rect', m3:'rect', m4:'round', m5:'high', m6:'rect', c1:'set', c2:'set', c3:'set' }
+// Foto real de referencia del local equipado, por rubro Y nivel de acabado (placeholder — reemplazar por fotos reales de Korbax)
+const ARQ_IMG = (id) => `https://images.unsplash.com/${id}?w=900&q=80&fit=crop`
+const ARQ_PHOTO = {
+  restaurante: { economico:'photo-1552566626-52f8b828add9', estandar:'photo-1517248135467-4c7edcad34c4', premium:'photo-1559339352-11d035aa65de' },
+  bar:         { economico:'photo-1538488881038-e252a119ace7', estandar:'photo-1514933651103-005eec06c04b', premium:'photo-1572116469696-31de0f17cc34' },
+  cafeteria:   { economico:'photo-1501339847302-ac426a4a7cbb', estandar:'photo-1554118811-1e0d58224f24', premium:'photo-1559925393-8be0ec4767c8' },
+  oficina:     { economico:'photo-1497366216548-37526070297c', estandar:'photo-1556761175-5973dc0f32e7', premium:'photo-1604328698692-f76ea9498e76' },
+  colegio:     { economico:'photo-1588072432836-e10032774350', estandar:'photo-1509062522246-3755977927d7', premium:'photo-1571260899304-425eee4c7efc' },
+  hotel:       { economico:'photo-1566073771259-6a8506099945', estandar:'photo-1551882547-ff40c63fe5fa', premium:'photo-1564501049412-61c2a3083791' },
+  clinica:     { economico:'photo-1631679706909-1844bbd07221', estandar:'photo-1519494026892-80bbd2d6fd0d', premium:'photo-1538108149393-fbbd81895907' },
+  eventos:     { economico:'photo-1464366400600-7168b8af9bc3', estandar:'photo-1519225421980-715cb0215aed', premium:'photo-1530103862676-de8c9debad1d' },
+}
+const arqPhoto = (rubroId, estilo) => ARQ_IMG(ARQ_PHOTO[rubroId]?.[estilo] || ARQ_PHOTO[rubroId]?.estandar || 'photo-1517248135467-4c7edcad34c4')
+const ARQ_CHAIR_IDS = new Set(['s1','s2','s3','s4','s5','s6'])
+
+// Plano 2D a escala: dibuja el local con las mesas/sillas distribuidas
+function FloorPlan({ items, rubro, area, areaOk }) {
+  const C = useContext(ThemeCtx)
+  const accent = rubro.color
+  const units = []
+  items.forEach(it => { if (ARQ_TABLE_IDS.has(it.id)) for (let i = 0; i < it.qty; i++) units.push(ARQ_SHAPE[it.id] || 'square') })
+  const tables = units.length
+  const hasBar = items.some(it => ARQ_BAR_IDS.has(it.id))
+  const a = parseFloat(area)
+  const dims = a > 0 ? (() => { const L = Math.sqrt(a * 1.45); return { L, W: a / L } })() : null
+
+  const CELL = 82, PAD = 26, BARW = hasBar ? 34 : 0, TS = 30, CH = 7
+  const drawN = Math.max(1, Math.min(tables, 40))
+  const cols = Math.max(1, Math.round(Math.sqrt(drawN * 1.5)))
+  const rows = Math.ceil(drawN / cols)
+  const Wc = PAD * 2 + cols * CELL + BARW + 14
+  const Hc = PAD * 2 + rows * CELL
+  const cells = Array.from({ length: drawN }, (_, i) => ({
+    x: PAD + 14 + (i % cols) * CELL + CELL / 2,
+    y: PAD + Math.floor(i / cols) * CELL + CELL / 2,
+    shape: units[i] || 'square',
+  }))
+  const midX = PAD + (Wc - PAD * 2) / 2
+  const midY = PAD + (Hc - PAD * 2) / 2
+  const WOOD = '#c79a63', WOODS = '#8a6a40'
+  // dibuja una mesa según su forma + sus sillas alrededor
+  const drawTable = (p, i) => {
+    const chairTBLR = (extra = 0) => (<>
+      <circle cx={p.x} cy={p.y - TS / 2 - CH - 2 - extra} r={CH} fill={accent} />
+      <circle cx={p.x} cy={p.y + TS / 2 + CH + 2 + extra} r={CH} fill={accent} />
+      <circle cx={p.x - TS / 2 - CH - 2 - extra} cy={p.y} r={CH} fill={accent} />
+      <circle cx={p.x + TS / 2 + CH + 2 + extra} cy={p.y} r={CH} fill={accent} />
+    </>)
+    switch (p.shape) {
+      case 'round': return (<g key={i}>{chairTBLR()}<circle cx={p.x} cy={p.y} r={TS / 2 + 1} fill={WOOD} stroke={WOODS} strokeWidth="1.5" /></g>)
+      case 'high': return (<g key={i}>
+        {/* mesa alta: 3 taburetes (aro) + tablero pequeño con anillo */}
+        <circle cx={p.x} cy={p.y - TS / 2 - CH} r={CH - 1} fill="none" stroke={accent} strokeWidth="3" />
+        <circle cx={p.x - TS / 2 - CH + 1} cy={p.y + CH + 2} r={CH - 1} fill="none" stroke={accent} strokeWidth="3" />
+        <circle cx={p.x + TS / 2 + CH - 1} cy={p.y + CH + 2} r={CH - 1} fill="none" stroke={accent} strokeWidth="3" />
+        <circle cx={p.x} cy={p.y} r={TS / 2 - 4} fill={WOOD} stroke={WOODS} strokeWidth="1.5" />
+        <circle cx={p.x} cy={p.y} r={TS / 2 - 9} fill="none" stroke={WOODS} strokeWidth="1" opacity="0.6" />
+      </g>)
+      case 'rect': case 'set': return (<g key={i}>
+        {/* mesa rectangular: 2 sillas arriba, 2 abajo */}
+        <circle cx={p.x - 11} cy={p.y - TS / 2 - CH - 2} r={CH} fill={accent} />
+        <circle cx={p.x + 11} cy={p.y - TS / 2 - CH - 2} r={CH} fill={accent} />
+        <circle cx={p.x - 11} cy={p.y + TS / 2 + CH + 2} r={CH} fill={accent} />
+        <circle cx={p.x + 11} cy={p.y + TS / 2 + CH + 2} r={CH} fill={accent} />
+        <rect x={p.x - TS / 2 - 8} y={p.y - TS / 2} width={TS + 16} height={TS} rx="4" fill={WOOD} stroke={WOODS} strokeWidth="1.5" />
+      </g>)
+      default: return (<g key={i}>{chairTBLR()}<rect x={p.x - TS / 2} y={p.y - TS / 2} width={TS} height={TS} rx="5" fill={WOOD} stroke={WOODS} strokeWidth="1.5" /></g>)
+    }
+  }
+
+  return (
+    <div className="rounded-2xl overflow-hidden border mb-5" style={{ borderColor: C.border }}>
+      <div className="flex items-center justify-between px-4 py-2.5" style={{ background: C.petrol }}>
+        <span className="font-nunito font-bold text-xs uppercase tracking-wide" style={{ color: C.sand }}>📐 Plano de tu local</span>
+        <span className="font-nunito text-[11px] font-bold" style={{ color: areaOk ? '#34d399' : '#fbbf24' }}>
+          {dims ? `≈ ${dims.L.toFixed(1)} × ${dims.W.toFixed(1)} m` : 'Distribución sugerida'}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${Wc} ${Hc}`} className="w-full" style={{ maxHeight: 340, display: 'block', background: '#16282b' }} preserveAspectRatio="xMidYMid meet">
+        <rect x={PAD} y={PAD} width={Wc - PAD * 2} height={Hc - PAD * 2} rx="6" fill="#1b3033" stroke={accent} strokeOpacity="0.55" strokeWidth="2" />
+        <rect x={midX - 16} y={Hc - PAD - 3} width="32" height="6" fill="#16282b" />
+        <text x={midX} y={Hc - 9} fill="#6c8987" fontSize="10" textAnchor="middle" fontFamily="sans-serif">entrada</text>
+        {hasBar && (<g>
+          <rect x={Wc - PAD - BARW} y={PAD + 8} width={BARW - 6} height={Hc - PAD * 2 - 16} rx="4" fill={accent} opacity="0.9" />
+          <text x={Wc - PAD - BARW / 2 - 3} y={midY} fill="#fff" fontSize="9" fontWeight="700" textAnchor="middle"
+            transform={`rotate(90 ${Wc - PAD - BARW / 2 - 3} ${midY})`} fontFamily="sans-serif">BARRA</text>
+        </g>)}
+        {cells.map((p, i) => drawTable(p, i))}
+      </svg>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5" style={{ background: C.petrol }}>
+        <span className="font-nunito text-[11px] flex items-center gap-1.5" style={{ color: C.mist }}><span style={{ width: 10, height: 10, background: '#c79a63', borderRadius: 2, display: 'inline-block' }} /> Mesa</span>
+        <span className="font-nunito text-[11px] flex items-center gap-1.5" style={{ color: C.mist }}><span style={{ width: 10, height: 10, background: accent, borderRadius: 99, display: 'inline-block' }} /> Silla</span>
+        {hasBar && <span className="font-nunito text-[11px] flex items-center gap-1.5" style={{ color: C.mist }}><span style={{ width: 14, height: 8, background: accent, borderRadius: 2, display: 'inline-block' }} /> Barra</span>}
+        {tables > drawN && <span className="font-nunito text-[11px]" style={{ color: C.mist }}>+{tables - drawN} mesas más</span>}
+      </div>
+    </div>
+  )
+}
+
+function ArquitectoSection() {
+  const C = useContext(ThemeCtx)
+  const { setQty, setOpen } = useCart()
+  const [rubro,    setRubro]    = useState(null)
+  const [personas, setPersonas] = useState('')
+  const [area,     setArea]     = useState('')
+  const [estilo,   setEstilo]   = useState('estandar')
+  const [plan,     setPlan]     = useState(null)
+  const [phase,    setPhase]    = useState('idle')  // idle | analyzing | done
+  const [view,     setView]     = useState('vista') // vista | plano
+  const [added,    setAdded]    = useState(false)
+  const [logo,     setLogo]     = useState(null)
+  const [logoOn,   setLogoOn]   = useState('ambos') // mesas | sillas | ambos
+  const [arOpen,   setArOpen]   = useState(false)
+  const fileRef = useRef(null)
+  const handleLogo = (file) => {
+    if (!file || !file.type.startsWith('image/')) return
+    if (logo) URL.revokeObjectURL(logo)
+    setLogo(URL.createObjectURL(file))
+  }
+  useEffect(() => () => { if (logo) URL.revokeObjectURL(logo) }, [])
+
+  const design = () => {
+    const p = parseInt(personas, 10)
+    if (!rubro || !p || p <= 0) return
+    const pl = arqPlan(rubro.id, p, estilo)
+    if (!pl) return
+    const a = parseFloat(area)
+    let areaMsg = null, areaOk = true
+    if (a && a > 0) {
+      const cap = Math.floor(a / ARQ_AREA[rubro.id])
+      if (p > cap) { areaOk = false; areaMsg = `Para ${p} personas se recomiendan ~${Math.ceil(p * ARQ_AREA[rubro.id])} m². Tu local de ${a} m² podría quedar ajustado (capacidad cómoda ≈ ${cap}). Lo optimizamos contigo.` }
+      else areaMsg = `Tu local de ${a} m² admite cómodamente ≈ ${cap} personas. Vas sobrado para ${p}.`
+    }
+    const nM = pl.items.filter(i => ARQ_TABLE_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0)
+    const nS = pl.items.filter(i => ARQ_CHAIR_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0)
+    const nB = pl.items.filter(i => ARQ_BAR_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0)
+    setAdded(false)
+    setPlan({ ...pl, personas:p, estilo, areaMsg, areaOk, counts: { nM, nS, nB } })
+    setPhase('analyzing')
+    setTimeout(() => setPhase('done'), 1550)
+  }
+
+  const addAll = () => { plan.items.forEach(it => setQty(`cat-${it.id}`, it.name, it.qty)); setAdded(true); setOpen(true) }
+  const arqWaLink = () => {
+    if (!plan) return wa(DEFAULT_MSG)
+    const lines = plan.items.map(it => `• ${it.qty}× ${it.name}`).join('\n')
+    return wa(`¡Hola Korbax! Usé el Arquitecto IA para mi ${rubro.label.toLowerCase()} de ${plan.personas} personas y me sugirió:\n${lines}\n\nTotal referencial: S/ ${plan.total.toLocaleString('es-PE')} + IGV. ¿Me ayudan a cotizarlo?`)
+  }
+
+  return (
+    <section id="arquitecto" className="py-16 sm:py-20 px-4 sm:px-6 scroll-mt-16" style={{ background: C.gray }}>
+      <div className="max-w-5xl mx-auto text-center mb-10 fade-up">
+        <SectionLabel>Arquitecto IA</SectionLabel>
+        <h2 className="font-outfit font-black uppercase leading-none mb-3" style={{ fontSize:'clamp(2rem,5vw,3.5rem)', color:C.carbon }}>
+          Diseña tu local en segundos
+        </h2>
+        <p className="font-nunito text-sm sm:text-base max-w-2xl mx-auto" style={{ color:C.stone }}>
+          Dinos tu rubro y cuántas personas, y armamos al instante cuántas mesas, sillas y barras necesitas — con un estimado y todo listo para cotizar.
+        </p>
+        <p className="font-nunito text-xs sm:text-sm mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ color:C.stone, background:`${C.sand}14` }}>
+          💡 Ideal si <strong style={{ color:C.carbon }}>aún no sabes</strong> qué muebles ni cuántos necesitas.
+        </p>
+      </div>
+
+      <div className="max-w-5xl mx-auto">
+        {/* Paso 1 — Rubro */}
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-7 h-7 rounded-full flex items-center justify-center font-outfit font-black text-xs shrink-0" style={{ background:C.sand, color:C.petrol }}>1</div>
+            <h3 className="font-outfit font-black text-lg sm:text-xl uppercase" style={{ color:C.carbon }}>¿Qué tipo de local es?</h3>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {EST_TYPES.map(type => {
+              const Icon = type.icon
+              const active = rubro?.id === type.id
+              return (
+                <button key={type.id} onClick={() => { setRubro(type); setPlan(null); setPhase('idle') }}
+                  className="flex flex-col items-center gap-2.5 p-4 rounded-2xl border-2 transition-all duration-200 active:scale-[0.97]"
+                  style={{ background: active ? `${type.color}12` : C.ivory, borderColor: active ? type.color : C.border, boxShadow: active ? `0 4px 20px ${type.color}22` : 'none' }}>
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background:`${type.color}1a`, color:type.color }}>
+                    <Icon size={22} />
+                  </div>
+                  <span className="font-nunito font-bold text-xs sm:text-sm text-center" style={{ color:C.carbon }}>{type.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Paso 2 — Datos */}
+        <div className="mb-8" style={{ opacity: rubro ? 1 : 0.45, pointerEvents: rubro ? 'auto' : 'none' }}>
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-7 h-7 rounded-full flex items-center justify-center font-outfit font-black text-xs shrink-0" style={{ background:C.sand, color:C.petrol }}>2</div>
+            <h3 className="font-outfit font-black text-lg sm:text-xl uppercase" style={{ color:C.carbon }}>¿Para cuántas personas?</h3>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4 mb-5">
+            <div>
+              <label className="block font-nunito font-bold text-xs mb-1.5" style={{ color:C.stone }}>N.º de personas / aforo *</label>
+              <input type="number" min="1" value={personas} onChange={e => setPersonas(e.target.value)} placeholder="Ej. 30"
+                className="w-full rounded-xl border px-4 py-3 text-sm font-nunito outline-none" style={{ borderColor:C.border, background:C.ivory, color:C.carbon }} />
+            </div>
+            <div>
+              <label className="block font-nunito font-bold text-xs mb-1.5" style={{ color:C.stone }}>Área del local en m² <span style={{ opacity:0.6 }}>(opcional)</span></label>
+              <input type="number" min="1" value={area} onChange={e => setArea(e.target.value)} placeholder="Ej. 45"
+                className="w-full rounded-xl border px-4 py-3 text-sm font-nunito outline-none" style={{ borderColor:C.border, background:C.ivory, color:C.carbon }} />
+            </div>
+          </div>
+          <div className="mb-6">
+            <label className="block font-nunito font-bold text-xs mb-2" style={{ color:C.stone }}>Nivel de acabado</label>
+            <div className="flex flex-wrap gap-2">
+              {ARQ_ESTILOS.map(es => (
+                <button key={es.id} onClick={() => setEstilo(es.id)}
+                  className="text-xs font-nunito font-bold px-5 py-2 rounded-full border transition-all duration-200"
+                  style={{ background: estilo === es.id ? C.sand : 'transparent', color: estilo === es.id ? C.petrol : C.stone, borderColor: estilo === es.id ? C.sand : C.border }}>
+                  {es.label}
+                </button>
+              ))}
+            </div>
+            <p className="font-nunito text-[11px] sm:text-xs mt-2" style={{ color:C.stone }}>{ARQ_ACABADO[estilo]}</p>
+          </div>
+          <SandBtn onClick={design} className="px-7 py-3.5"><Sparkles size={16} /> Diseñar mi local <ArrowRight size={15} /></SandBtn>
+        </div>
+
+        {/* Animación de análisis */}
+        {phase === 'analyzing' && (
+          <div className="arq-pop rounded-3xl border p-6 sm:p-9 text-center" style={{ background:C.ivory, borderColor:C.border }}>
+            <div className="inline-flex items-center gap-2 mb-5">
+              <Sparkles size={20} className="animate-pulse" style={{ color:C.sand }} />
+              <span className="font-outfit font-black uppercase text-base sm:text-lg" style={{ color:C.carbon }}>Analizando tu local…</span>
+            </div>
+            <div className="max-w-sm mx-auto h-2 rounded-full overflow-hidden mb-6" style={{ background:C.border }}>
+              <div className="arq-bar h-full rounded-full" style={{ background:C.sand }} />
+            </div>
+            <div className="max-w-xs mx-auto space-y-2.5 text-left">
+              {['Calculando aforo y circulación','Seleccionando el mobiliario ideal','Distribuyendo en el plano','Estimando tu inversión'].map((s, i) => (
+                <div key={i} className="arq-step flex items-center gap-2 font-nunito text-sm" style={{ color:C.stone, animationDelay:`${0.15 + i * 0.33}s` }}>
+                  <Check size={15} style={{ color:'#10B981' }} /> {s}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Resultado */}
+        {phase === 'done' && plan && (
+          <div key={rubro.id + plan.personas + estilo} className="arq-pop rounded-3xl border p-5 sm:p-7" style={{ background:C.ivory, borderColor:C.border }}>
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles size={18} style={{ color:C.sand }} />
+              <h3 className="font-outfit font-black text-lg sm:text-xl uppercase" style={{ color:C.carbon }}>Tu local diseñado</h3>
+            </div>
+            <p className="font-nunito text-sm mb-5" style={{ color:C.stone }}>
+              Para tu <strong style={{ color:C.carbon }}>{rubro.label.toLowerCase()}</strong> de <strong style={{ color:C.carbon }}>{plan.personas} personas</strong> diseñamos esta distribución:
+            </p>
+
+            <div className="flex items-start gap-2 rounded-xl px-3 py-2 mb-5" style={{ background:`${C.sand}1a`, border:`1px solid ${C.sand}44` }}>
+              <Sparkles size={14} style={{ color:C.sand, marginTop:2, flexShrink:0 }} />
+              <span className="font-nunito text-xs sm:text-sm" style={{ color:C.carbon }}>
+                <strong>Acabado {ARQ_ESTILOS.find(x => x.id === plan.estilo)?.label}:</strong> {ARQ_ACABADO[plan.estilo]}
+              </span>
+            </div>
+
+            {/* Toggle Vista inmersiva / Plano */}
+            <div className="flex gap-2 mb-4">
+              {[{ k:'vista', t:'🪟 Vista del local' }, { k:'plano', t:'📐 Plano 2D' }].map(o => (
+                <button key={o.k} onClick={() => setView(o.k)}
+                  className="flex-1 text-xs sm:text-sm font-nunito font-bold px-4 py-2.5 rounded-xl border transition-all duration-200"
+                  style={{ background: view === o.k ? C.sand : 'transparent', color: view === o.k ? C.petrol : C.stone, borderColor: view === o.k ? C.sand : C.border }}>
+                  {o.t}
+                </button>
+              ))}
+            </div>
+
+            {view === 'plano'
+              ? <FloorPlan items={plan.items} rubro={rubro} area={area} areaOk={plan.areaOk} />
+              : (
+                <div className="rounded-2xl overflow-hidden border mb-5" style={{ borderColor:C.border }}>
+                  <div className="flex items-center justify-between px-4 py-2.5" style={{ background:C.petrol }}>
+                    <span className="font-nunito font-bold text-xs uppercase tracking-wide" style={{ color:C.sand }}>🪟 Así se vería tu {rubro.label.toLowerCase()}</span>
+                    <span className="font-nunito text-[11px] font-bold" style={{ color:C.mist }}>Referencia real</span>
+                  </div>
+                  <div className="relative" style={{ aspectRatio:'16/10' }}>
+                    <img src={arqPhoto(rubro.id, plan.estilo)} alt={`Local tipo ${rubro.label}`} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0" style={{ background:'linear-gradient(to top, rgba(11,20,22,0.9) 0%, rgba(11,20,22,0.15) 46%, transparent 72%)' }} />
+                    <div className="absolute inset-x-0 bottom-0 p-4">
+                      <div className="flex flex-wrap gap-2 mb-1.5">
+                        <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:'rgba(255,255,255,0.94)', color:C.petrol }}>🍽 {plan.counts.nM} mesas</span>
+                        <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:'rgba(255,255,255,0.94)', color:C.petrol }}>🪑 {plan.counts.nS} sillas</span>
+                        {plan.counts.nB > 0 && <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:rubro.color, color:'#fff' }}>▮ {plan.counts.nB} barra</span>}
+                      </div>
+                      <p className="font-nunito text-[11px]" style={{ color:'rgba(255,255,255,0.78)' }}>Imagen referencial de un {rubro.label.toLowerCase()} equipado.</p>
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-2" style={{ background:C.petrol }}>
+                    <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => handleLogo(e.target.files[0])} />
+                    {logo && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-nunito font-bold text-[11px]" style={{ color:C.mist }}>Logo en:</span>
+                        {[{ k:'mesas', t:'Mesas' }, { k:'sillas', t:'Sillas' }, { k:'ambos', t:'Ambos' }].map(o => (
+                          <button key={o.k} onClick={() => setLogoOn(o.k)}
+                            className="text-[11px] font-nunito font-bold px-3 py-1 rounded-full border transition-all duration-200"
+                            style={{ background: logoOn === o.k ? C.sand : 'transparent', color: logoOn === o.k ? C.petrol : C.sand, borderColor:`${C.sand}66` }}>
+                            {o.t}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button onClick={() => fileRef.current?.click()}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-nunito font-bold text-xs sm:text-sm border transition-all duration-200 active:scale-[0.98]"
+                        style={{ borderColor:`${C.sand}55`, color:C.sand, background:`${C.sand}12` }}>
+                        <Upload size={15} /> {logo ? 'Cambiar mi logo' : 'Poner mi logo'}
+                      </button>
+                      <button onClick={() => setArOpen(true)}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-nunito font-bold text-xs sm:text-sm transition-all duration-200 active:scale-[0.98]"
+                        style={{ background:C.sand, color:C.petrol }}>
+                        <Sparkles size={15} /> Ver en Realidad Aumentada
+                      </button>
+                    </div>
+                    <p className="font-nunito text-[10px] text-center" style={{ color:C.mist }}>Tip: usa un PNG con fondo transparente para que tu logo se vea limpio.</p>
+                  </div>
+                </div>
+              )}
+
+            {plan.areaMsg && (
+              <div className="rounded-xl px-4 py-3 mb-5 font-nunito text-xs sm:text-sm flex gap-2"
+                style={{ background: plan.areaOk ? '#10B98115' : '#F59E0B18', color:C.carbon, border:`1px solid ${plan.areaOk ? '#10B98140' : '#F59E0B45'}` }}>
+                {plan.areaOk ? <Check size={16} style={{ color:'#10B981', flexShrink:0, marginTop:1 }} /> : <ZoomIn size={16} style={{ color:'#F59E0B', flexShrink:0, marginTop:1 }} />}
+                <span>{plan.areaMsg}</span>
+              </div>
+            )}
+
+            <div className="space-y-3 mb-6">
+              {plan.items.map(it => (
+                <div key={it.id} className="flex items-center gap-3 sm:gap-4 rounded-2xl border p-3" style={{ borderColor:C.border, background:C.gray }}>
+                  <div className="relative w-20 h-16 sm:w-24 sm:h-[68px] rounded-xl overflow-hidden shrink-0" style={{ background:`${rubro.color}12` }}>
+                    <FurnitureSVG type={ARQ_SVG[it.id]} accent={rubro.color} bare />
+                    <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md font-outfit font-black text-[11px] leading-none" style={{ background:C.sand, color:C.petrol }}>{it.qty}×</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-nunito font-bold text-sm leading-tight" style={{ color:C.carbon }}>{it.name}</p>
+                    <p className="font-nunito text-xs leading-snug" style={{ color:C.stone }}>{it.motivo}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="font-outfit font-black text-sm" style={{ color:C.carbon }}>S/ {(it.price * it.qty).toLocaleString('es-PE')}</p>
+                    <p className="font-nunito text-[10px]" style={{ color:C.stone }}>S/ {it.price.toLocaleString('es-PE')} c/u</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3 mb-5" style={{ background:`${C.sand}1f`, border:`1px solid ${C.sand}55` }}>
+              <span className="font-nunito font-bold text-sm" style={{ color:C.carbon }}>Total referencial</span>
+              <span className="font-outfit font-black text-lg sm:text-xl" style={{ color:C.carbon }}>S/ {plan.total.toLocaleString('es-PE')} <span className="text-xs font-nunito font-normal" style={{ color:C.stone }}>+ IGV</span></span>
+            </div>
+            <p className="font-nunito text-[11px] mb-6" style={{ color:C.stone }}>
+              * Estimado de referencia con precios de fábrica. La cotización final depende de medidas, acabados y volumen — sin costo ni compromiso.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <SandBtn onClick={addAll} className="flex-1 justify-center py-3.5">
+                {added ? <><Check size={16} /> Agregado al pedido</> : <><ShoppingBag size={16} /> Agregar todo al pedido</>}
+              </SandBtn>
+              <a href={arqWaLink()} target="_blank" rel="noopener noreferrer"
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3.5 font-nunito font-bold text-sm transition-all duration-200 active:scale-[0.98]"
+                style={{ background:C.petrol, color:C.onDark }}>
+                <MessageCircle size={16} /> Cotizar por WhatsApp
+              </a>
+            </div>
+            <p className="text-center font-nunito text-xs mt-4" style={{ color:C.stone }}>
+              Cambia el rubro, el aforo o el acabado y rediseñamos tu local al instante.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {arOpen && rubro && (
+        <ARModal
+          model={{ name: `Tu ${rubro.label.toLowerCase()} con ${plan?.personas || 0} personas` }}
+          srcUrl={buildSalonURL({ people: plan?.personas || 4, kind: rubro.id === 'bar' ? 'bar' : 'dining', accent: rubro.color, logoOn })}
+          logo={logo}
+          finish={{ uph: rubro.color }}
+          onClose={() => setArOpen(false)} />
+      )}
+    </section>
+  )
+}
+
 const PAGE_META = {
+  arquitecto:   { label: 'Arquitecto IA', title: 'Planifica tu local',        icon: Sparkles },
   catalogo:     { label: 'Catálogo',     title: 'Nuestros productos',        icon: LayoutGrid },
-  configurador: { label: 'Configurador', title: 'Diseña tu local en 3D',     icon: Sparkles },
+  configurador: { label: 'Modelos 3D',   title: 'Personaliza tu mueble',     icon: Sparkles },
   galeria:      { label: 'Galería',      title: 'Nuestro trabajo',           icon: Camera },
   nosotros:     { label: 'Nosotros',     title: 'Conoce Industrias Korbax',  icon: ShieldCheck },
   contacto:     { label: 'Contacto',     title: 'Hablemos',                  icon: MessageCircle },
@@ -2349,8 +2787,8 @@ function HomeSummary() {
           <p className="font-nunito max-w-md mx-auto text-base" style={{ color: C.stone }}>Diseña tu local, mira el catálogo, conócenos y cotiza — cada cosa en su propia página.</p>
         </div>
 
-        {/* Tarjeta destacada: Configurador */}
-        <a href="#/configurador"
+        {/* Tarjeta destacada: Arquitecto IA */}
+        <a href="#/arquitecto"
           className="fade-up group block rounded-3xl overflow-hidden mb-5 relative"
           style={{ background: C.petrol }}>
           <div className="absolute -top-16 -right-16 w-72 h-72 rounded-full blur-3xl pointer-events-none" style={{ background: `${C.sand}20` }} />
@@ -2360,14 +2798,14 @@ function HomeSummary() {
                 <Sparkles size={12} /> Herramienta estrella
               </span>
               <h3 className="font-outfit font-black uppercase leading-none mb-4" style={{ fontSize: 'clamp(1.8rem,4vw,2.8rem)', color: C.onDark }}>
-                Diseña tu local en 3D
+                Diseña tu local con IA
               </h3>
               <p className="font-nunito text-sm sm:text-base leading-relaxed mb-6" style={{ color: C.mist }}>
-                Elige tu tipo de negocio, sube tu logo y míralo aplicado sobre cada mueble. Arma tu pedido y cotízalo por WhatsApp.
+                Dinos tu rubro y aforo: el Arquitecto IA te arma cuántas mesas y sillas necesitas, el plano de tu local y la cotización — al instante.
               </p>
               <span className="inline-flex items-center gap-2 font-nunito font-black text-base px-7 py-3.5 rounded-2xl transition-transform duration-200 group-hover:scale-[1.03]"
                 style={{ background: C.sand, color: C.petrol }}>
-                Abrir configurador <ArrowRight size={18} />
+                Abrir Arquitecto IA <ArrowRight size={18} />
               </span>
             </div>
             <div className="grid grid-cols-3 gap-3">
@@ -2721,7 +3159,7 @@ export default function App() {
             <div className="anim-1 inline-flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl mb-7 font-nunito border leading-snug text-left"
               style={{ color: C.petrol, background: `${C.sand}1f`, borderColor: `${C.sand}66` }}>
               <Sparkles size={14} style={{ color: C.sand }} className="animate-pulse shrink-0" />
-              Nuevo · Mira tu mobiliario en tu local con Realidad Aumentada
+              Nuevo · Arquitecto IA: diseña tu local en segundos
             </div>
             <h1 className="anim-2 font-outfit font-black uppercase leading-[0.95] mb-5 break-words"
               style={{ fontSize: 'clamp(2.3rem, 7.5vw, 5.2rem)', color: C.carbon }}>
@@ -2736,8 +3174,8 @@ export default function App() {
               <strong style={{ color: C.carbon, fontWeight: 800 }}>restaurantes, oficinas, hoteles, colegios, clínicas, eventos y más.</strong>
             </p>
             <div className="anim-4 flex flex-col sm:flex-row gap-3 mb-4">
-              <SandBtn href="#/configurador" size="lg" className="shadow-xl rounded-2xl justify-center w-full sm:w-auto">
-                <Sparkles size={20} /> Diseña tu local en 3D + AR
+              <SandBtn href="#/arquitecto" size="lg" className="shadow-xl rounded-2xl justify-center w-full sm:w-auto">
+                <Sparkles size={20} /> Diseña tu local con IA
               </SandBtn>
               <a href={wa(DEFAULT_MSG)} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-2 font-bold font-nunito rounded-2xl px-8 py-4 text-base transition-all duration-200 hover:opacity-90 active:scale-[0.97] w-full sm:w-auto"
@@ -2746,15 +3184,24 @@ export default function App() {
               </a>
             </div>
             <p className="anim-4 text-xs sm:text-sm font-nunito mb-6 max-w-md" style={{ color: C.stone }}>
-              Elige tus muebles, ponles <strong style={{ color: C.carbon }}>tu logo y colores</strong> y míralos a tamaño real en tu local — sin instalar nada.
+              Dinos tu rubro y aforo: la IA te arma <strong style={{ color: C.carbon }}>cuántas mesas y sillas necesitas</strong>, el plano de tu local y la cotización — al instante.
             </p>
-            <a href="#/catalogo"
-              className="anim-4 inline-flex items-center gap-2 text-sm font-nunito font-bold transition-all duration-200"
-              style={{ color: C.stone }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
-              Ver catálogo completo <ChevronRight size={16} />
-            </a>
+            <div className="anim-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+              <a href="#/configurador"
+                className="inline-flex items-center gap-2 text-sm font-nunito font-bold transition-all duration-200"
+                style={{ color: C.stone }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+Modelos 3D para personalizar <ChevronRight size={16} />
+              </a>
+              <a href="#/catalogo"
+                className="inline-flex items-center gap-2 text-sm font-nunito font-bold transition-all duration-200"
+                style={{ color: C.stone }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+                Ver catálogo <ChevronRight size={16} />
+              </a>
+            </div>
             <div className="anim-4 flex items-center gap-4 pt-6 border-t" style={{ borderColor: C.border }}>
               <div className="flex -space-x-2.5">
                 {[C.petrol, '#2a4a4d', '#163035', '#1a3a3d'].map((bg, i) => (
@@ -2906,6 +3353,9 @@ export default function App() {
       </section>
 
       </>)}
+
+      {/* ════════ ARQUITECTO IA (página) ════════ */}
+      {route === 'arquitecto' && <ArquitectoSection />}
 
       {/* ════════ CONFIGURADOR 3D (página) ════════ */}
       {route === 'configurador' && <ConfiguradorSection />}

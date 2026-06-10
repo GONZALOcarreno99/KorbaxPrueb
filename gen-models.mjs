@@ -495,6 +495,9 @@ function buildGLB(prims) {
   return Buffer.concat([header, jH, json, bH, binBuf])
 }
 
+// Nota: el "salón" con gente del Arquitecto ahora se genera al vuelo en el navegador
+// (src/salon3d.js) para que el nº de personas coincida EXACTO con el aforo.
+
 const out = {
   silla: chair, sillapil: stackChair, sillejec: execChair, butaca: armchair,
   mesa: table, mesacuad: squareTable, mesaconf: confTable, mesaredonda: roundTable, mesaalta: barTable,
