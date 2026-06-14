@@ -43,6 +43,76 @@ function cylG(x, z, y0, y1, r, seg = 12) {
   for (let j = 0; j < seg; j++) idx.push(top, top + 1 + j, top + 2 + j)
   return { pos, nrm, idx }
 }
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l] }
+// cilindro tronco-cónico entre dos puntos (patas torneadas, postes, travesaños)
+function tube(p0, p1, r0, r1 = r0, seg = 10) {
+  const dir = norm([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]])
+  const up = Math.abs(dir[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]
+  const u = norm(cross(up, dir)), w = norm(cross(dir, u))
+  const pos = [], nrm = [], idx = []
+  for (let j = 0; j <= seg; j++) {
+    const a = j / seg * 2 * Math.PI, ca = Math.cos(a), sa = Math.sin(a)
+    const nx = u[0] * ca + w[0] * sa, ny = u[1] * ca + w[1] * sa, nz = u[2] * ca + w[2] * sa
+    pos.push(p0[0] + nx * r0, p0[1] + ny * r0, p0[2] + nz * r0); nrm.push(nx, ny, nz)
+    pos.push(p1[0] + nx * r1, p1[1] + ny * r1, p1[2] + nz * r1); nrm.push(nx, ny, nz)
+  }
+  for (let j = 0; j < seg; j++) { const a = j * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3) }
+  return { pos, nrm, idx }
+}
+// rota una geometría alrededor del eje X (en el plano YZ) sobre un pivote → reclinar respaldos
+function rotX(g, ang, py, pz) {
+  const c = Math.cos(ang), s = Math.sin(ang)
+  for (let i = 0; i < g.pos.length; i += 3) { const y = g.pos[i + 1] - py, z = g.pos[i + 2] - pz; g.pos[i + 1] = py + y * c - z * s; g.pos[i + 2] = pz + y * s + z * c }
+  for (let i = 0; i < g.nrm.length; i += 3) { const y = g.nrm[i + 1], z = g.nrm[i + 2]; g.nrm[i + 1] = y * c - z * s; g.nrm[i + 2] = y * s + z * c }
+  return g
+}
+// vuelca un sub-modelo local (construido mirando a +z) al modelo global, rotado en Y (yaw) y trasladado
+function mergeInto(M, L, cx, cz, theta) {
+  const c = Math.cos(theta), s = Math.sin(theta)
+  for (const mat in L) {
+    const g = L[mat]
+    for (let i = 0; i < g.pos.length; i += 3) { const x = g.pos[i], z = g.pos[i + 2]; g.pos[i] = x * c + z * s + cx; g.pos[i + 2] = -x * s + z * c + cz }
+    for (let i = 0; i < g.nrm.length; i += 3) { const x = g.nrm[i], z = g.nrm[i + 2]; g.nrm[i] = x * c + z * s; g.nrm[i + 2] = -x * s + z * c }
+    add(M, mat, g)
+  }
+}
+// Tablero con esquinas redondeadas (planta) + canto abullonado (bullnose) → mesa real, no caja
+function roundSlab(cx, cy, cz, w, d, th, corner = 0.07, edge = 0.018, vseg = 4, aseg = 5) {
+  const hw = w / 2, hd = d / 2, r = Math.min(corner, hw, hd)
+  const O = []
+  const cs = [[hw - r, hd - r, 0], [-(hw - r), hd - r, Math.PI / 2], [-(hw - r), -(hd - r), Math.PI], [hw - r, -(hd - r), 3 * Math.PI / 2]]
+  for (const [ax, az, a0] of cs) for (let i = 0; i <= aseg; i++) { const a = a0 + (i / aseg) * (Math.PI / 2), nx = Math.cos(a), nz = Math.sin(a); O.push({ x: ax + nx * r, z: az + nz * r, nx, nz }) }
+  const M = O.length, pos = [], nrm = [], idx = []
+  const push = (x, y, z, nx, ny, nz) => { pos.push(cx + x, cy + y, cz + z); nrm.push(nx, ny, nz); return pos.length / 3 - 1 }
+  const rings = []
+  for (let k = 0; k <= vseg; k++) {
+    const a = (k / vseg) * Math.PI, y = (th / 2) * Math.cos(a), off = -edge * (1 - Math.sin(a)), ny = Math.cos(a), nh = Math.sin(a), ring = []
+    for (const p of O) ring.push(push(p.x + p.nx * off, y, p.z + p.nz * off, p.nx * nh, ny, p.nz * nh)); rings.push(ring)
+  }
+  for (let k = 0; k < vseg; k++) for (let i = 0; i < M; i++) { const a = rings[k][i], b = rings[k][(i + 1) % M], c = rings[k + 1][i], e = rings[k + 1][(i + 1) % M]; idx.push(a, c, b, b, c, e) }
+  const tc = push(0, th / 2, 0, 0, 1, 0); for (let i = 0; i < M; i++) idx.push(tc, rings[0][i], rings[0][(i + 1) % M])
+  const bc = push(0, -th / 2, 0, 0, -1, 0); for (let i = 0; i < M; i++) idx.push(bc, rings[vseg][(i + 1) % M], rings[vseg][i])
+  return { pos, nrm, idx }
+}
+const roundDisc = (cx, cy, cz, radius, th, edge = 0.016) => roundSlab(cx, cy, cz, radius * 2, radius * 2, th, radius, edge, 4, 9)
+const lerp = (a, b, t) => a + (b - a) * t
+// Cojín/almohadón: cubo esferizado (caras planas al centro, cantos abultados) → tapicería real, no caja
+function roundBox(cx, cy, cz, sx, sy, sz, t = 0.5, seg = 7) {
+  const hx = sx / 2, hy = sy / 2, hz = sz / 2, pos = [], nrm = [], idx = []
+  const sph = (x, y, z) => { const x2 = x * x, y2 = y * y, z2 = z * z; return [x * Math.sqrt(1 - y2 / 2 - z2 / 2 + y2 * z2 / 3), y * Math.sqrt(1 - z2 / 2 - x2 / 2 + z2 * x2 / 3), z * Math.sqrt(1 - x2 / 2 - y2 / 2 + x2 * y2 / 3)] }
+  const face = (ua, va, wa, ws) => {
+    const base = pos.length / 3
+    for (let i = 0; i <= seg; i++) for (let j = 0; j <= seg; j++) {
+      const c = [0, 0, 0]; c[ua] = i / seg * 2 - 1; c[va] = j / seg * 2 - 1; c[wa] = ws
+      const s = sph(c[0], c[1], c[2]), nl = Math.hypot(s[0], s[1], s[2]) || 1
+      pos.push(lerp(c[0], s[0], t) * hx + cx, lerp(c[1], s[1], t) * hy + cy, lerp(c[2], s[2], t) * hz + cz); nrm.push(s[0] / nl, s[1] / nl, s[2] / nl)
+    }
+    for (let i = 0; i < seg; i++) for (let j = 0; j < seg; j++) { const a = base + i * (seg + 1) + j, b = a + 1, cc = a + (seg + 1), d = cc + 1; if (ws > 0) idx.push(a, cc, b, b, cc, d); else idx.push(a, b, cc, b, d, cc) }
+  }
+  face(1, 2, 0, 1); face(1, 2, 0, -1); face(0, 2, 1, 1); face(0, 2, 1, -1); face(0, 1, 2, 1); face(0, 1, 2, -1)
+  return { pos, nrm, idx }
+}
 // quad horizontal (mesa, mira hacia arriba) — con UV para el logo
 function quadTop(cx, cy, cz, w, d) {
   const x = w / 2, z = d / 2
@@ -110,22 +180,64 @@ function person(M, cx, cz, seatY, fx, fz, v) {
   const kx = cx + fx * 0.38, kz = cz + fz * 0.38, sH = seatY + 0.06
   for (const s of [-1, 1]) add(M, legMat, boxG(kx + (fz ? s * 0.09 : 0), sH / 2, kz + (fx ? s * 0.09 : 0), 0.10, sH, 0.11)) // pantorrillas al piso (delante)
 }
-function chair(M, cx, cz, fx, fz, h = 0.45, withLogo = true) {
-  add(M, 'fabric', boxG(cx, h, cz, 0.40, 0.06, 0.40))                       // asiento
-  add(M, 'fabric', boxG(cx - fx * 0.19, h + 0.21, cz - fz * 0.19, fz ? 0.40 : 0.06, 0.40, fz ? 0.06 : 0.40)) // respaldo
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) add(M, 'legs', cylG(cx + sx * 0.17, cz + sz * 0.17, 0, h - 0.03, 0.018))
-  if (withLogo) add(M, 'logoSilla', quadFacing(cx - fx * 0.225, h + 0.21, cz - fz * 0.225, -fx, -fz, 0.36, 0.36)) // logo casi todo el respaldo (llega al borde)
+// Silla construida en orientación canónica (mira a +z, respaldo en -z) y luego rotada/colocada.
+// style: 'clasica' (cojín+respaldo), 'apilable' (asiento fino+listones), 'taburete' (redondo, sin respaldo)
+function chair(M, cx, cz, fx, fz, h = 0.45, withLogo = true, style = 'clasica') {
+  const L = {}, SE = 0.42, hb = SE / 2 - 0.02   // borde trasero del asiento (z = -hb)
+  if (style === 'taburete') {
+    add(L, 'fabric', roundBox(0, h + 0.02, 0, 0.36, 0.10, 0.36, 0.6))   // asiento redondo
+    for (const a of [0, 1, 2, 3]) { const ang = a * Math.PI / 2 + Math.PI / 4, dx = Math.cos(ang), dz = Math.sin(ang)
+      add(L, 'legs', tube([dx * 0.13, h - 0.06, dz * 0.13], [dx * 0.21, 0, dz * 0.21], 0.02, 0.012, 8)) }
+    add(L, 'legs', cylG(0, 0, h * 0.42, h * 0.42 + 0.02, 0.18, 16))      // aro reposapiés
+    if (withLogo) add(L, 'logoSilla', quadTop(0, h + 0.072, 0, 0.3, 0.3))
+    mergeInto(M, L, cx, cz, Math.atan2(fx, fz)); return
+  }
+  // patas torneadas ABIERTAS + travesaños (común a clásica y apilable)
+  add(L, 'legs', boxG(0, h - 0.06, 0, SE - 0.04, 0.05, SE - 0.04))
+  for (const sx of [-1, 1]) for (const sz of [-1, 1])
+    add(L, 'legs', tube([sx * 0.145, h - 0.08, sz * 0.145], [sx * 0.205, 0, sz * 0.205], 0.021, 0.012, 8))
+  for (const sx of [-1, 1]) add(L, 'legs', tube([sx * 0.185, 0.11, -0.185], [sx * 0.185, 0.11, 0.185], 0.011, 0.011, 6))
+  add(L, 'legs', tube([-0.185, 0.085, 0.06], [0.185, 0.085, 0.06], 0.011, 0.011, 6))
+  const recline = -0.17, pivY = h - 0.02, pivZ = -hb
+  for (const s of [-1, 1]) add(L, 'legs', rotX(tube([s * (SE / 2 - 0.045), h - 0.02, -hb], [s * (SE / 2 - 0.045), h + 0.46, -hb], 0.017, 0.014, 8), recline, pivY, pivZ))
+  if (style === 'apilable') {
+    // asiento fino + respaldo de 2 listones (ligero, sin cojín grueso)
+    add(L, 'fabric', roundBox(0, h + 0.01, 0, SE, 0.06, SE, 0.4))
+    add(L, 'fabric', rotX(boxG(0, h + 0.16, -hb, SE - 0.06, 0.07, 0.035), recline, pivY, pivZ))
+    add(L, 'fabric', rotX(boxG(0, h + 0.31, -hb, SE - 0.06, 0.07, 0.035), recline, pivY, pivZ))
+    if (withLogo) add(L, 'logoSilla', rotX(quadFacing(0, h + 0.31, -hb - 0.025, 0, -1, SE - 0.08, 0.065), recline, pivY, pivZ))
+  } else {
+    // clásica: cojín mullido + respaldo cojín
+    add(L, 'fabric', roundBox(0, h + 0.02, 0, SE, 0.11, SE, 0.55))
+    add(L, 'fabric', rotX(roundBox(0, h + 0.27, -hb - 0.012, SE - 0.06, 0.34, 0.085, 0.55), recline, pivY, pivZ))
+    if (withLogo) add(L, 'logoSilla', rotX(quadFacing(0, h + 0.28, -hb - 0.062, 0, -1, 0.34, 0.30), recline, pivY, pivZ))
+  }
+  mergeInto(M, L, cx, cz, Math.atan2(fx, fz))
 }
-function diningTable(M, cx, cz, withLogo = true) {
-  add(M, 'wood', boxG(cx, 0.74, cz, 0.95, 0.05, 0.78))
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) add(M, 'legs', cylG(cx + sx * 0.40, cz + sz * 0.30, 0, 0.72, 0.024))
-  if (withLogo) add(M, 'logoMesa', quadTop(cx, 0.768, cz, 0.88, 0.72))      // logo casi toda la mesa (llega al borde)
+// shape: 'rect' (rectangular), 'square' (cuadrada), 'round' (redonda con pedestal)
+function diningTable(M, cx, cz, withLogo = true, shape = 'rect') {
+  const TH = 0.74
+  if (shape === 'round') {
+    add(M, 'wood', roundDisc(cx, TH, cz, 0.47, 0.05, 0.02))                     // tablero redondo
+    add(M, 'legs', tube([cx, 0.05, cz], [cx, TH - 0.02, cz], 0.06, 0.045, 14))  // columna central
+    add(M, 'legs', cylG(cx, cz, 0, 0.05, 0.30, 20))                            // base disco
+    if (withLogo) add(M, 'logoMesa', quadTop(cx, TH + 0.032, cz, 0.66, 0.66))
+    return
+  }
+  const W = shape === 'square' ? 0.80 : 0.95, D = shape === 'square' ? 0.80 : 0.78
+  add(M, 'wood', roundSlab(cx, TH, cz, W, D, 0.05, 0.11, 0.02))                 // tablero esquinas redondeadas + canto abullonado
+  for (const sz of [-1, 1]) add(M, 'wood', boxG(cx, TH - 0.07, cz + sz * (D / 2 - 0.05), W - 0.10, 0.08, 0.04))
+  for (const sx of [-1, 1]) add(M, 'wood', boxG(cx + sx * (W / 2 - 0.05), TH - 0.07, cz, 0.04, 0.08, D - 0.10))
+  for (const sx of [-1, 1]) for (const sz of [-1, 1])
+    add(M, 'legs', tube([cx + sx * (W / 2 - 0.09), TH - 0.06, cz + sz * (D / 2 - 0.08)], [cx + sx * (W / 2 - 0.12), 0, cz + sz * (D / 2 - 0.11)], 0.03, 0.019, 10))
+  if (withLogo) add(M, 'logoMesa', quadTop(cx, TH + 0.032, cz, shape === 'square' ? 0.7 : 0.88, shape === 'square' ? 0.7 : 0.72))
 }
 function barTable(M, cx, cz, withLogo = true) {
-  add(M, 'wood', sphereG(cx, 1.04, cz, 0.34, 0.025, 0.34, 16))
-  add(M, 'legs', cylG(cx, cz, 0, 1.02, 0.045))
-  add(M, 'legs', cylG(cx, cz, 0, 0.05, 0.22, 16))
-  if (withLogo) add(M, 'logoMesa', quadTop(cx, 1.068, cz, 0.6, 0.6))
+  add(M, 'wood', roundDisc(cx, 1.04, cz, 0.34, 0.05, 0.018))                    // tablero redondo con canto abullonado
+  add(M, 'legs', tube([cx, 0.05, cz], [cx, 1.00, cz], 0.06, 0.045, 14))         // columna
+  add(M, 'legs', cylG(cx, cz, 0.30, 0.335, 0.27, 18))                          // aro reposapiés
+  add(M, 'legs', cylG(cx, cz, 0, 0.05, 0.24, 18))                              // base disco
+  if (withLogo) add(M, 'logoMesa', quadTop(cx, 1.072, cz, 0.6, 0.6))
 }
 
 const SEATS_DINE = [{ x: 0, z: 0.60, fx: 0, fz: -1 }, { x: 0, z: -0.60, fx: 0, fz: 1 }, { x: 0.60, z: 0, fx: -1, fz: 0 }, { x: -0.60, z: 0, fx: 1, fz: 0 }]
@@ -166,7 +278,16 @@ function buildGLB(M, accent) {
     images = [{ bufferView: imgV, mimeType: 'image/png' }]; samplers = [{ wrapS: 33071, wrapT: 33071 }]; textures = [{ source: 0, sampler: 0 }]
   }
   const materials = names.map(n => {
-    if (n.startsWith('logo')) return { name: n, alphaMode: 'BLEND', doubleSided: true, pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 0], baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 0.6 } }
+    if (n.startsWith('logo')) return {
+      name: n,
+      // MASK (recorte duro) en vez de BLEND: la transparencia se exporta bien a la AR del
+      // celular (Scene Viewer / Quick Look) → mismo resultado en PC y móvil, sin marco blanco.
+      alphaMode: 'MASK', alphaCutoff: 0.4, doubleSided: true,
+      // el logo se usa también como textura EMISIVA → brilla con su color y la luz de la
+      // escena no lo apaga (se nota mucho más). El ARModal le pone la textura y el factor.
+      emissiveTexture: { index: 0 }, emissiveFactor: [0, 0, 0],
+      pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 0], baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 1 },
+    }
     const c = PAL[n] || [0.7, 0.7, 0.7]
     const metal = n === 'legs'
     return { name: n, pbrMetallicRoughness: { baseColorFactor: [c[0], c[1], c[2], 1], metallicFactor: metal ? 0.85 : 0, roughnessFactor: metal ? 0.4 : (n === 'wood' ? 0.55 : 0.8) }, doubleSided: true }
@@ -192,14 +313,15 @@ function buildGLB(M, accent) {
 
 // cache simple para no regenerar ni filtrar URLs
 let _cache = { key: '', url: '' }
-export function buildSalonURL({ people, kind = 'dining', accent = '#E85D5D', logoOn = 'ambos' }) {
+export function buildSalonURL({ people, kind = 'dining', accent = '#E85D5D', logoOn = 'ambos', tableType = 'rect', chairType = 'clasica' }) {
   const n = Math.max(1, Math.min(people | 0, 60))
-  const key = `${kind}|${n}|${accent}|${logoOn}`
+  const bar = kind === 'bar'
+  const cstyle = bar ? 'taburete' : chairType
+  const key = `${kind}|${n}|${accent}|${logoOn}|${tableType}|${cstyle}`
   if (_cache.key === key) return _cache.url
   if (_cache.url) URL.revokeObjectURL(_cache.url)
   const tableLogo = logoOn === 'mesas' || logoOn === 'ambos'
   const chairLogo = logoOn === 'sillas' || logoOn === 'ambos'
-  const bar = kind === 'bar'
   const perTable = bar ? 3 : 4
   const seats = bar ? SEATS_BAR : SEATS_DINE
   const tables = Math.ceil(n / perTable)
@@ -210,12 +332,11 @@ export function buildSalonURL({ people, kind = 'dining', accent = '#E85D5D', log
   for (let t = 0; t < tables; t++) {
     const c = t % cols, r = Math.floor(t / cols)
     const tx = (c - (cols - 1) / 2) * sx, tz = (r - Math.floor((tables - 1) / cols) / 2) * sz
-    if (bar) barTable(M, tx, tz, tableLogo); else diningTable(M, tx, tz, tableLogo)
+    if (bar) barTable(M, tx, tz, tableLogo); else diningTable(M, tx, tz, tableLogo, tableType)
     for (const s of seats) {
       if (placed >= n) break
       const px = tx + s.x, pz = tz + s.z
-      chair(M, px, pz, s.fx, s.fz, bar ? 0.66 : 0.45, chairLogo)
-      person(M, px, pz, bar ? 0.66 : 0.45, s.fx, s.fz, VARIANTS[placed % VARIANTS.length])
+      chair(M, px, pz, s.fx, s.fz, bar ? 0.66 : 0.45, chairLogo, cstyle)
       placed++
     }
   }

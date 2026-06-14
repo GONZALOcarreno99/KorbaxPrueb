@@ -5,8 +5,8 @@ import {
   CheckCircle, X, ChevronRight, ChevronDown, Star, Camera, ZoomIn, LayoutGrid,
   Pencil, Hammer, ArrowUp, Sun, Moon, ChevronsLeftRight,
   Utensils, Wine, Building2, GraduationCap, Coffee, Stethoscope, Calendar,
-  Sparkles, Upload, Check, Plus, ArrowLeft, Trash2, RotateCcw,
-  ShoppingBag, Search, CreditCard, Clock, Award, FileText
+  Sparkles, Upload, Check, Plus, Minus, ArrowLeft, Trash2, RotateCcw,
+  ShoppingBag, Search, CreditCard, Clock, Award, FileText, Download, Wallet
 } from 'lucide-react'
 import './index.css'
 import { buildSalonURL } from './salon3d'
@@ -1377,7 +1377,7 @@ function ARModal({ model, logo, finish, placement, onClose, srcUrl }) {
   const C = useContext(ThemeCtx)
   const src = srcUrl || asset(arModelFor(model.svgType))
   const mvRef = useRef(null)
-  const logoMatsRef = useRef({})       // { key: pbr } — una o varias superficies de logo
+  const logoMatsRef = useRef({})       // { key: material } — una o varias superficies de logo
   const debRef = useRef(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
@@ -1408,8 +1408,8 @@ function ARModal({ model, logo, finish, placement, onClose, srcUrl }) {
           else if (n === 'wood') pbr.setBaseColorFactor([...hexToLinear(finish?.wood  || FCOL.wood),  1])
           else if (n.startsWith('logo')) {
             const k = logoKey(m.name)
-            logoMatsRef.current[k] = pbr
-            if (!logo) pbr.setBaseColorFactor([1, 1, 1, 0]) // sin logo → superficie limpia
+            logoMatsRef.current[k] = m   // material completo (para base + emisivo)
+            if (!logo) { pbr.setBaseColorFactor([1, 1, 1, 0]); try { m.setEmissiveFactor([0, 0, 0]) } catch {} } // sin logo → superficie limpia
           }
         }
         const keys = Object.keys(logoMatsRef.current)
@@ -1437,10 +1437,13 @@ function ARModal({ model, logo, finish, placement, onClose, srcUrl }) {
       for (const k of Object.keys(logoMatsRef.current)) {
         const p = lp[k]; if (!p) continue
         try {
+          const mat = logoMatsRef.current[k]
           const url = await composeLogoTexture(logo, p, srcUrl ? 1 : arLogoAspect(model.svgType), srcUrl ? false : arLogoRound(model.svgType))
           const tex = await mvRef.current.createTexture(url)
-          logoMatsRef.current[k].baseColorTexture.setTexture(tex)
-          logoMatsRef.current[k].setBaseColorFactor([1, 1, 1, 1])
+          mat.pbrMetallicRoughness.baseColorTexture.setTexture(tex)
+          mat.pbrMetallicRoughness.setBaseColorFactor([1, 1, 1, 1])
+          // el logo también como emisivo → resalta y no lo apaga la luz de la escena
+          try { mat.emissiveTexture.setTexture(tex); mat.setEmissiveFactor([1, 1, 1]) } catch { /* glb sin slot emisivo */ }
         } catch { /* noop */ }
       }
     }, 110)
@@ -2362,11 +2365,25 @@ const ARQ_PHOTO = {
 }
 const arqPhoto = (rubroId, estilo) => ARQ_IMG(ARQ_PHOTO[rubroId]?.[estilo] || ARQ_PHOTO[rubroId]?.estandar || 'photo-1517248135467-4c7edcad34c4')
 const ARQ_CHAIR_IDS = new Set(['s1','s2','s3','s4','s5','s6'])
+// Selector de tipo de mesa/silla en el Arquitecto (cambia lista, precio y AR del salón)
+const ARQ_MESA_OPTS  = ['m1', 'm2', 'm4']   // Cuadrada / Rectangular / Redonda
+const ARQ_SILLA_OPTS = ['s1', 's2', 's6']   // Apilable / Con cojín / Madera
+const ARQ_MESA_3D  = { m1: 'square', m2: 'rect', m3: 'rect', m4: 'round', m6: 'rect' }
+const ARQ_SILLA_3D = { s1: 'apilable', s2: 'clasica', s4: 'clasica', s5: 'clasica', s6: 'clasica' }
+const ARQ_SHORT = { m1: 'Cuadrada', m2: 'Rectangular', m4: 'Redonda', s1: 'Apilable', s2: 'Con cojín', s6: 'De madera' }
+const ARQ_DINING_TABLE_IDS = new Set(['m1', 'm2', 'm3', 'm4']) // mesas de comedor (excluye m5 bar y m6 industrial)
+// cuenta mesas/sillas/barras de un conjunto de líneas (con sus cantidades ya ajustadas)
+const arqCounts = (items) => ({
+  nM: items.filter(i => ARQ_TABLE_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0),
+  nS: items.filter(i => ARQ_CHAIR_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0),
+  nB: items.filter(i => ARQ_BAR_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0),
+})
 
 // Plano 2D a escala: dibuja el local con las mesas/sillas distribuidas
 function FloorPlan({ items, rubro, area, areaOk }) {
   const C = useContext(ThemeCtx)
   const accent = rubro.color
+  const svgRef = useRef(null)
   const units = []
   items.forEach(it => { if (ARQ_TABLE_IDS.has(it.id)) for (let i = 0; i < it.qty; i++) units.push(ARQ_SHAPE[it.id] || 'square') })
   const tables = units.length
@@ -2388,6 +2405,26 @@ function FloorPlan({ items, rubro, area, areaOk }) {
   const midX = PAD + (Wc - PAD * 2) / 2
   const midY = PAD + (Hc - PAD * 2) / 2
   const WOOD = '#c79a63', WOODS = '#8a6a40'
+  // descarga el plano como PNG (serializa el SVG → canvas, con fondo sólido para reenviar/imprimir)
+  const downloadPlano = () => {
+    const svg = svgRef.current; if (!svg) return
+    const clone = svg.cloneNode(true)
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    const xml = new XMLSerializer().serializeToString(clone)
+    const src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)))
+    const img = new Image()
+    img.onload = () => {
+      const scale = 2
+      const cv = document.createElement('canvas')
+      cv.width = Wc * scale; cv.height = Hc * scale
+      const ctx = cv.getContext('2d')
+      ctx.fillStyle = '#16282b'; ctx.fillRect(0, 0, cv.width, cv.height)
+      ctx.drawImage(img, 0, 0, cv.width, cv.height)
+      const a = document.createElement('a')
+      a.download = `korbax-plano-${rubro.id}.png`; a.href = cv.toDataURL('image/png'); a.click()
+    }
+    img.src = src
+  }
   // dibuja una mesa según su forma + sus sillas alrededor
   const drawTable = (p, i) => {
     const chairTBLR = (extra = 0) => (<>
@@ -2426,8 +2463,15 @@ function FloorPlan({ items, rubro, area, areaOk }) {
           {dims ? `≈ ${dims.L.toFixed(1)} × ${dims.W.toFixed(1)} m` : 'Distribución sugerida'}
         </span>
       </div>
-      <svg viewBox={`0 0 ${Wc} ${Hc}`} className="w-full" style={{ maxHeight: 340, display: 'block', background: '#16282b' }} preserveAspectRatio="xMidYMid meet">
+      <svg ref={svgRef} viewBox={`0 0 ${Wc} ${Hc}`} className="w-full" style={{ maxHeight: 340, display: 'block', background: '#16282b' }} preserveAspectRatio="xMidYMid meet">
         <rect x={PAD} y={PAD} width={Wc - PAD * 2} height={Hc - PAD * 2} rx="6" fill="#1b3033" stroke={accent} strokeOpacity="0.55" strokeWidth="2" />
+        {/* aro de circulación: pasillo perimetral entre la pared y el mobiliario */}
+        <rect x={PAD + 7} y={PAD + 7} width={Wc - PAD * 2 - 14 - BARW} height={Hc - PAD * 2 - 14} rx="4"
+          fill="none" stroke="#4a6b6d" strokeWidth="1.2" strokeDasharray="5 5" opacity="0.65" />
+        {dims && (<g fontFamily="sans-serif" fill="#7fa3a1" fontSize="10" fontWeight="700">
+          <text x={midX} y={PAD - 9} textAnchor="middle">Largo ≈ {dims.L.toFixed(1)} m</text>
+          <text x={PAD - 9} y={midY} textAnchor="middle" transform={`rotate(-90 ${PAD - 9} ${midY})`}>Ancho ≈ {dims.W.toFixed(1)} m</text>
+        </g>)}
         <rect x={midX - 16} y={Hc - PAD - 3} width="32" height="6" fill="#16282b" />
         <text x={midX} y={Hc - 9} fill="#6c8987" fontSize="10" textAnchor="middle" fontFamily="sans-serif">entrada</text>
         {hasBar && (<g>
@@ -2441,7 +2485,11 @@ function FloorPlan({ items, rubro, area, areaOk }) {
         <span className="font-nunito text-[11px] flex items-center gap-1.5" style={{ color: C.mist }}><span style={{ width: 10, height: 10, background: '#c79a63', borderRadius: 2, display: 'inline-block' }} /> Mesa</span>
         <span className="font-nunito text-[11px] flex items-center gap-1.5" style={{ color: C.mist }}><span style={{ width: 10, height: 10, background: accent, borderRadius: 99, display: 'inline-block' }} /> Silla</span>
         {hasBar && <span className="font-nunito text-[11px] flex items-center gap-1.5" style={{ color: C.mist }}><span style={{ width: 14, height: 8, background: accent, borderRadius: 2, display: 'inline-block' }} /> Barra</span>}
+        <span className="font-nunito text-[11px] flex items-center gap-1.5" style={{ color: C.mist }}><span style={{ width: 14, height: 0, borderTop: '1.5px dashed #6c8987', display: 'inline-block' }} /> Circulación</span>
         {tables > drawN && <span className="font-nunito text-[11px]" style={{ color: C.mist }}>+{tables - drawN} mesas más</span>}
+        <button onClick={downloadPlano} className="ml-auto inline-flex items-center gap-1.5 font-nunito font-bold text-[11px] px-2.5 py-1 rounded-lg transition-opacity hover:opacity-80" style={{ color: C.petrol, background: C.sand }}>
+          <Download size={13} /> Descargar plano
+        </button>
       </div>
     </div>
   )
@@ -2453,8 +2501,12 @@ function ArquitectoSection() {
   const [rubro,    setRubro]    = useState(null)
   const [personas, setPersonas] = useState('')
   const [area,     setArea]     = useState('')
+  const [presup,   setPresup]   = useState('')   // presupuesto opcional (S/)
   const [estilo,   setEstilo]   = useState('estandar')
   const [plan,     setPlan]     = useState(null)
+  const [qtyAdj,   setQtyAdj]   = useState({})   // ajustes manuales de cantidad por id
+  const [mesaSel,  setMesaSel]  = useState(null) // override de tipo de mesa (id catálogo) o null = recomendado
+  const [sillaSel, setSillaSel] = useState(null) // override de tipo de silla
   const [phase,    setPhase]    = useState('idle')  // idle | analyzing | done
   const [view,     setView]     = useState('vista') // vista | plano
   const [added,    setAdded]    = useState(false)
@@ -2469,10 +2521,11 @@ function ArquitectoSection() {
   }
   useEffect(() => () => { if (logo) URL.revokeObjectURL(logo) }, [])
 
-  const design = () => {
+  // construye y muestra el plan para un acabado dado. animate=true reproduce la animación de análisis.
+  const applyPlan = (useEstilo, animate, budgetMsg = null) => {
     const p = parseInt(personas, 10)
     if (!rubro || !p || p <= 0) return
-    const pl = arqPlan(rubro.id, p, estilo)
+    const pl = arqPlan(rubro.id, p, useEstilo)
     if (!pl) return
     const a = parseFloat(area)
     let areaMsg = null, areaOk = true
@@ -2481,20 +2534,67 @@ function ArquitectoSection() {
       if (p > cap) { areaOk = false; areaMsg = `Para ${p} personas se recomiendan ~${Math.ceil(p * ARQ_AREA[rubro.id])} m². Tu local de ${a} m² podría quedar ajustado (capacidad cómoda ≈ ${cap}). Lo optimizamos contigo.` }
       else areaMsg = `Tu local de ${a} m² admite cómodamente ≈ ${cap} personas. Vas sobrado para ${p}.`
     }
-    const nM = pl.items.filter(i => ARQ_TABLE_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0)
-    const nS = pl.items.filter(i => ARQ_CHAIR_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0)
-    const nB = pl.items.filter(i => ARQ_BAR_IDS.has(i.id)).reduce((s, i) => s + i.qty, 0)
+    setEstilo(useEstilo)
+    setQtyAdj({})
+    setMesaSel(null); setSillaSel(null)
     setAdded(false)
-    setPlan({ ...pl, personas:p, estilo, areaMsg, areaOk, counts: { nM, nS, nB } })
-    setPhase('analyzing')
-    setTimeout(() => setPhase('done'), 1550)
+    setPlan({ items: pl.items, personas: p, estilo: useEstilo, area, areaMsg, areaOk, budgetMsg })
+    if (animate) { setPhase('analyzing'); setTimeout(() => setPhase('done'), 1550) }
+    else setPhase('done')
   }
 
-  const addAll = () => { plan.items.forEach(it => setQty(`cat-${it.id}`, it.name, it.qty)); setAdded(true); setOpen(true) }
+  const design = () => {
+    const p = parseInt(personas, 10)
+    if (!rubro || !p || p <= 0) return
+    let useEstilo = estilo, budgetMsg = null
+    const bud = parseFloat(presup)
+    if (bud && bud > 0) {
+      // elige el acabado más alto que entre en el presupuesto
+      const order = ['premium', 'estandar', 'economico']
+      let chosen = order.find(es => (arqPlan(rubro.id, p, es)?.total ?? Infinity) <= bud)
+      if (chosen) {
+        useEstilo = chosen
+        const t = arqPlan(rubro.id, p, chosen).total
+        budgetMsg = { ok: true, text: `Con S/ ${bud.toLocaleString('es-PE')} alcanza el acabado ${ARQ_ESTILOS.find(x => x.id === chosen).label} (≈ S/ ${t.toLocaleString('es-PE')} + IGV). Lo ajustamos a tu medida.` }
+      } else {
+        useEstilo = 'economico'
+        const t = arqPlan(rubro.id, p, 'economico').total
+        budgetMsg = { ok: false, text: `El acabado más accesible para ${p} personas cuesta ≈ S/ ${t.toLocaleString('es-PE')} + IGV, por encima de tu presupuesto de S/ ${bud.toLocaleString('es-PE')}. Te mostramos el Económico y vemos opciones (volumen, etapas) contigo.` }
+      }
+    }
+    applyPlan(useEstilo, true, budgetMsg)
+  }
+
+  // cantidad efectiva de una línea (con el ajuste manual del usuario) y líneas vivas (qty > 0)
+  const qOf = (it) => qtyAdj[it.id] ?? it.qty
+  // líneas de mesa de comedor y de silla en el plan (para el selector de tipos)
+  const tableLine = plan ? plan.items.find(i => ARQ_DINING_TABLE_IDS.has(i.id)) : null
+  const chairLine = plan ? plan.items.find(i => ARQ_CHAIR_IDS.has(i.id)) : null
+  const showPicker = !!(tableLine && chairLine)
+  // sustituye la mesa/silla de una línea por la elegida por el usuario (id/nombre/precio del catálogo)
+  const dispOf = (it) => {
+    let sel = null
+    if (tableLine && it.id === tableLine.id) sel = mesaSel
+    else if (chairLine && it.id === chairLine.id) sel = sillaSel
+    const c = (sel && CAT_BY_ID[sel]) || it
+    return { id: c.id, name: c.name, price: c.price }
+  }
+  const effItems = plan ? plan.items.map(it => { const d = dispOf(it); return { id: d.id, name: d.name, price: d.price, qty: qOf(it), origId: it.id, motivo: it.motivo } }).filter(it => it.qty > 0) : []
+  const effTotal = effItems.reduce((a, it) => a + it.price * it.qty, 0)
+  const counts = arqCounts(effItems)
+  const bumpQty = (it, d) => setQtyAdj(prev => ({ ...prev, [it.id]: Math.max(0, qOf(it) + d) }))
+  // tipo 3D efectivo de mesa/silla para el salón AR
+  const arTableType = tableLine ? ARQ_MESA_3D[mesaSel || tableLine.id] || 'rect' : 'rect'
+  const arChairType = chairLine ? ARQ_SILLA_3D[sillaSel || chairLine.id] || 'clasica' : 'clasica'
+  // totales de los 3 acabados para el comparador
+  const pInt = parseInt(personas, 10)
+  const tierTotals = (rubro && pInt > 0) ? ARQ_ESTILOS.map(es => ({ ...es, total: arqPlan(rubro.id, pInt, es.id)?.total || 0 })) : []
+
+  const addAll = () => { effItems.forEach(it => setQty(`cat-${it.id}`, it.name, it.qty)); setAdded(true); setOpen(true) }
   const arqWaLink = () => {
     if (!plan) return wa(DEFAULT_MSG)
-    const lines = plan.items.map(it => `• ${it.qty}× ${it.name}`).join('\n')
-    return wa(`¡Hola Korbax! Usé el Arquitecto IA para mi ${rubro.label.toLowerCase()} de ${plan.personas} personas y me sugirió:\n${lines}\n\nTotal referencial: S/ ${plan.total.toLocaleString('es-PE')} + IGV. ¿Me ayudan a cotizarlo?`)
+    const lines = effItems.map(it => `• ${it.qty}× ${it.name}`).join('\n')
+    return wa(`¡Hola Korbax! Usé el Arquitecto IA para mi ${rubro.label.toLowerCase()} de ${plan.personas} personas y me sugirió:\n${lines}\n\nTotal referencial: S/ ${effTotal.toLocaleString('es-PE')} + IGV. ¿Me ayudan a cotizarlo?`)
   }
 
   return (
@@ -2568,6 +2668,14 @@ function ArquitectoSection() {
             </div>
             <p className="font-nunito text-[11px] sm:text-xs mt-2" style={{ color:C.stone }}>{ARQ_ACABADO[estilo]}</p>
           </div>
+          <div className="mb-6">
+            <label className="font-nunito font-bold text-xs mb-1.5 flex items-center gap-1.5" style={{ color:C.stone }}>
+              <Wallet size={13} style={{ color:C.sand }} /> Mi presupuesto en S/ <span style={{ opacity:0.6 }}>(opcional)</span>
+            </label>
+            <input type="number" min="1" value={presup} onChange={e => setPresup(e.target.value)} placeholder="Ej. 5000"
+              className="w-full sm:max-w-xs rounded-xl border px-4 py-3 text-sm font-nunito outline-none" style={{ borderColor:C.border, background:C.ivory, color:C.carbon }} />
+            <p className="font-nunito text-[11px] sm:text-xs mt-1.5" style={{ color:C.stone }}>Si lo indicas, elegimos automáticamente el mejor acabado que entra en tu presupuesto.</p>
+          </div>
           <SandBtn onClick={design} className="px-7 py-3.5"><Sparkles size={16} /> Diseñar mi local <ArrowRight size={15} /></SandBtn>
         </div>
 
@@ -2602,12 +2710,70 @@ function ArquitectoSection() {
               Para tu <strong style={{ color:C.carbon }}>{rubro.label.toLowerCase()}</strong> de <strong style={{ color:C.carbon }}>{plan.personas} personas</strong> diseñamos esta distribución:
             </p>
 
-            <div className="flex items-start gap-2 rounded-xl px-3 py-2 mb-5" style={{ background:`${C.sand}1a`, border:`1px solid ${C.sand}44` }}>
+            {/* Comparador de acabados: 3 totales lado a lado, clic = rediseña al instante */}
+            <p className="font-nunito font-bold text-xs uppercase tracking-wide mb-2" style={{ color:C.stone }}>Compara acabados y elige</p>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {tierTotals.map(t => {
+                const active = plan.estilo === t.id
+                return (
+                  <button key={t.id} onClick={() => applyPlan(t.id, false)}
+                    className="rounded-xl border-2 px-2 py-2.5 text-center transition-all duration-200 active:scale-[0.97]"
+                    style={{ borderColor: active ? C.sand : C.border, background: active ? `${C.sand}1f` : C.gray, boxShadow: active ? `0 4px 16px ${C.sand}33` : 'none' }}>
+                    <span className="block font-nunito font-bold text-[11px] sm:text-xs" style={{ color: active ? C.carbon : C.stone }}>{t.label}</span>
+                    <span className="block font-outfit font-black text-xs sm:text-sm mt-0.5" style={{ color: active ? C.carbon : C.stone }}>S/ {t.total.toLocaleString('es-PE')}</span>
+                    {active && <span className="inline-flex items-center gap-0.5 mt-1 font-nunito font-bold text-[9px] uppercase" style={{ color:C.sand }}><Check size={10} /> Elegido</span>}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex items-start gap-2 rounded-xl px-3 py-2 mb-3" style={{ background:`${C.sand}1a`, border:`1px solid ${C.sand}44` }}>
               <Sparkles size={14} style={{ color:C.sand, marginTop:2, flexShrink:0 }} />
               <span className="font-nunito text-xs sm:text-sm" style={{ color:C.carbon }}>
                 <strong>Acabado {ARQ_ESTILOS.find(x => x.id === plan.estilo)?.label}:</strong> {ARQ_ACABADO[plan.estilo]}
               </span>
             </div>
+            {plan.budgetMsg && (
+              <div className="flex items-start gap-2 rounded-xl px-3 py-2 mb-5 font-nunito text-xs sm:text-sm"
+                style={{ background: plan.budgetMsg.ok ? '#10B98115' : '#F59E0B18', color:C.carbon, border:`1px solid ${plan.budgetMsg.ok ? '#10B98140' : '#F59E0B45'}` }}>
+                <Wallet size={15} style={{ color: plan.budgetMsg.ok ? '#10B981' : '#F59E0B', flexShrink:0, marginTop:1 }} />
+                <span>{plan.budgetMsg.text}</span>
+              </div>
+            )}
+            {!plan.budgetMsg && <div className="mb-5" />}
+
+            {/* Selector de tipo de mesa/silla — arriba para elegir ANTES de ver en 3D/AR */}
+            {showPicker && (
+              <div className="rounded-2xl border p-4 mb-4" style={{ borderColor:`${C.sand}66`, background:`${C.sand}10` }}>
+                <p className="font-outfit font-black text-sm uppercase mb-0.5" style={{ color:C.carbon }}>Elige tu mesa y tu silla</p>
+                <p className="font-nunito text-[11px] mb-3 inline-flex items-center gap-1" style={{ color:C.stone }}>
+                  <Sparkles size={12} style={{ color:C.sand }} /> Así lo verás en la vista 3D y en Realidad Aumentada — y se actualizan la lista y el precio.
+                </p>
+                {[{ label:'Mesa',  opts:ARQ_MESA_OPTS,  cur:(mesaSel || tableLine.id),  set:setMesaSel },
+                  { label:'Silla', opts:ARQ_SILLA_OPTS, cur:(sillaSel || chairLine.id), set:setSillaSel }].map(row => (
+                  <div key={row.label} className="mb-3 last:mb-0">
+                    <span className="font-nunito font-bold text-[11px] uppercase tracking-wide" style={{ color:C.stone }}>{row.label}</span>
+                    <div className="grid grid-cols-3 gap-2 mt-1.5">
+                      {row.opts.map(id => {
+                        const c = CAT_BY_ID[id]; if (!c) return null
+                        const active = row.cur === id
+                        return (
+                          <button key={id} onClick={() => { row.set(id); setAdded(false) }}
+                            className="rounded-xl border-2 p-1.5 transition-all duration-200 active:scale-[0.97]"
+                            style={{ borderColor: active ? C.sand : C.border, background: active ? `${C.sand}1a` : C.ivory }}>
+                            <div className="relative rounded-lg overflow-hidden mb-1" style={{ aspectRatio:'4/3', background:`${rubro.color}10` }}>
+                              <FurnitureSVG type={ARQ_SVG[id]} accent={rubro.color} bare />
+                              {active && <span className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background:C.sand }}><Check size={11} style={{ color:C.petrol }} /></span>}
+                            </div>
+                            <span className="block font-nunito font-bold text-[11px] leading-tight text-center" style={{ color:C.carbon }}>{ARQ_SHORT[id] || c.name}</span>
+                            <span className="block font-nunito text-[10px] text-center" style={{ color:C.stone }}>S/ {c.price} c/u</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Toggle Vista inmersiva / Plano */}
             <div className="flex gap-2 mb-4">
@@ -2621,7 +2787,7 @@ function ArquitectoSection() {
             </div>
 
             {view === 'plano'
-              ? <FloorPlan items={plan.items} rubro={rubro} area={area} areaOk={plan.areaOk} />
+              ? <FloorPlan items={effItems} rubro={rubro} area={area} areaOk={plan.areaOk} />
               : (
                 <div className="rounded-2xl overflow-hidden border mb-5" style={{ borderColor:C.border }}>
                   <div className="flex items-center justify-between px-4 py-2.5" style={{ background:C.petrol }}>
@@ -2633,9 +2799,9 @@ function ArquitectoSection() {
                     <div className="absolute inset-0" style={{ background:'linear-gradient(to top, rgba(11,20,22,0.9) 0%, rgba(11,20,22,0.15) 46%, transparent 72%)' }} />
                     <div className="absolute inset-x-0 bottom-0 p-4">
                       <div className="flex flex-wrap gap-2 mb-1.5">
-                        <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:'rgba(255,255,255,0.94)', color:C.petrol }}>🍽 {plan.counts.nM} mesas</span>
-                        <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:'rgba(255,255,255,0.94)', color:C.petrol }}>🪑 {plan.counts.nS} sillas</span>
-                        {plan.counts.nB > 0 && <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:rubro.color, color:'#fff' }}>▮ {plan.counts.nB} barra</span>}
+                        <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:'rgba(255,255,255,0.94)', color:C.petrol }}>🍽 {counts.nM} mesas</span>
+                        <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:'rgba(255,255,255,0.94)', color:C.petrol }}>🪑 {counts.nS} sillas</span>
+                        {counts.nB > 0 && <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-nunito font-black text-xs" style={{ background:rubro.color, color:'#fff' }}>▮ {counts.nB} barra</span>}
                       </div>
                       <p className="font-nunito text-[11px]" style={{ color:'rgba(255,255,255,0.78)' }}>Imagen referencial de un {rubro.label.toLowerCase()} equipado.</p>
                     </div>
@@ -2679,28 +2845,38 @@ function ArquitectoSection() {
               </div>
             )}
 
+            <p className="font-nunito text-xs mb-2" style={{ color:C.stone }}>Ajusta las cantidades a tu medida con − / + :</p>
             <div className="space-y-3 mb-6">
-              {plan.items.map(it => (
-                <div key={it.id} className="flex items-center gap-3 sm:gap-4 rounded-2xl border p-3" style={{ borderColor:C.border, background:C.gray }}>
+              {plan.items.map(it => {
+                const q = qOf(it), d = dispOf(it)
+                return (
+                <div key={it.id} className="flex items-center gap-3 sm:gap-4 rounded-2xl border p-3" style={{ borderColor:C.border, background:C.gray, opacity: q === 0 ? 0.5 : 1 }}>
                   <div className="relative w-20 h-16 sm:w-24 sm:h-[68px] rounded-xl overflow-hidden shrink-0" style={{ background:`${rubro.color}12` }}>
-                    <FurnitureSVG type={ARQ_SVG[it.id]} accent={rubro.color} bare />
-                    <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md font-outfit font-black text-[11px] leading-none" style={{ background:C.sand, color:C.petrol }}>{it.qty}×</span>
+                    <FurnitureSVG type={ARQ_SVG[d.id]} accent={rubro.color} bare />
+                    <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md font-outfit font-black text-[11px] leading-none" style={{ background:C.sand, color:C.petrol }}>{q}×</span>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-nunito font-bold text-sm leading-tight" style={{ color:C.carbon }}>{it.name}</p>
-                    <p className="font-nunito text-xs leading-snug" style={{ color:C.stone }}>{it.motivo}</p>
+                    <p className="font-nunito font-bold text-sm leading-tight" style={{ color:C.carbon }}>{d.name}</p>
+                    <p className="font-nunito text-xs leading-snug mb-1.5" style={{ color:C.stone }}>{it.motivo}</p>
+                    <div className="inline-flex items-center rounded-lg border overflow-hidden" style={{ borderColor:C.border, background:C.ivory }}>
+                      <button onClick={() => bumpQty(it, -1)} disabled={q === 0} aria-label="Quitar uno"
+                        className="w-7 h-7 flex items-center justify-center transition-opacity disabled:opacity-30" style={{ color:C.carbon }}><Minus size={13} /></button>
+                      <span className="w-8 text-center font-outfit font-black text-sm" style={{ color:C.carbon }}>{q}</span>
+                      <button onClick={() => bumpQty(it, 1)} aria-label="Agregar uno"
+                        className="w-7 h-7 flex items-center justify-center" style={{ color:C.carbon }}><Plus size={13} /></button>
+                    </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="font-outfit font-black text-sm" style={{ color:C.carbon }}>S/ {(it.price * it.qty).toLocaleString('es-PE')}</p>
-                    <p className="font-nunito text-[10px]" style={{ color:C.stone }}>S/ {it.price.toLocaleString('es-PE')} c/u</p>
+                    <p className="font-outfit font-black text-sm" style={{ color:C.carbon }}>S/ {(d.price * q).toLocaleString('es-PE')}</p>
+                    <p className="font-nunito text-[10px]" style={{ color:C.stone }}>S/ {d.price.toLocaleString('es-PE')} c/u</p>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
 
             <div className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3 mb-5" style={{ background:`${C.sand}1f`, border:`1px solid ${C.sand}55` }}>
               <span className="font-nunito font-bold text-sm" style={{ color:C.carbon }}>Total referencial</span>
-              <span className="font-outfit font-black text-lg sm:text-xl" style={{ color:C.carbon }}>S/ {plan.total.toLocaleString('es-PE')} <span className="text-xs font-nunito font-normal" style={{ color:C.stone }}>+ IGV</span></span>
+              <span className="font-outfit font-black text-lg sm:text-xl" style={{ color:C.carbon }}>S/ {effTotal.toLocaleString('es-PE')} <span className="text-xs font-nunito font-normal" style={{ color:C.stone }}>+ IGV</span></span>
             </div>
             <p className="font-nunito text-[11px] mb-6" style={{ color:C.stone }}>
               * Estimado de referencia con precios de fábrica. La cotización final depende de medidas, acabados y volumen — sin costo ni compromiso.
@@ -2726,7 +2902,7 @@ function ArquitectoSection() {
       {arOpen && rubro && (
         <ARModal
           model={{ name: `Tu ${rubro.label.toLowerCase()} con ${plan?.personas || 0} personas` }}
-          srcUrl={buildSalonURL({ people: plan?.personas || 4, kind: rubro.id === 'bar' ? 'bar' : 'dining', accent: rubro.color, logoOn })}
+          srcUrl={buildSalonURL({ people: plan?.personas || 4, kind: rubro.id === 'bar' ? 'bar' : 'dining', accent: rubro.color, logoOn, tableType: arTableType, chairType: arChairType })}
           logo={logo}
           finish={{ uph: rubro.color }}
           onClose={() => setArOpen(false)} />

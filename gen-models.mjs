@@ -139,6 +139,40 @@ function roundBox(cx, cy, cz, sx, sy, sz, t = 0.45, seg = 8) {
   face(1, 2, 0, 1); face(1, 2, 0, -1); face(0, 2, 1, 1); face(0, 2, 1, -1); face(0, 1, 2, 1); face(0, 1, 2, -1)
   return { pos, nrm, uv, idx }
 }
+// Tablero/placa con ESQUINAS REDONDEADAS (en planta) y CANTO ABULLONADO (bullnose) → mesa real, no losa cuadrada
+function roundRectSlab(cx, cy, cz, w, d, th, corner = 0.09, edge = 0.02, vseg = 5, aseg = 6) {
+  const hw = w / 2, hd = d / 2, r = Math.min(corner, hw, hd)
+  // contorno de rectángulo redondeado (puntos + normal exterior en XZ)
+  const O = []
+  const cs = [[hw - r, hd - r, 0], [-(hw - r), hd - r, Math.PI / 2], [-(hw - r), -(hd - r), Math.PI], [hw - r, -(hd - r), 3 * Math.PI / 2]]
+  for (const [ax, az, a0] of cs) for (let i = 0; i <= aseg; i++) {
+    const a = a0 + (i / aseg) * (Math.PI / 2), nx = Math.cos(a), nz = Math.sin(a)
+    O.push({ x: ax + nx * r, z: az + nz * r, nx, nz })
+  }
+  const M = O.length, pos = [], nrm = [], uv = [], idx = []
+  const push = (x, y, z, nx, ny, nz, u, v) => { pos.push(cx + x, cy + y, cz + z); nrm.push(nx, ny, nz); uv.push(u, v); return pos.length / 3 - 1 }
+  // anillos del canto (v=0 arriba → vseg abajo), perfil bullnose: mete `edge` arriba/abajo y sale al máximo al medio
+  const rings = []
+  for (let k = 0; k <= vseg; k++) {
+    const a = (k / vseg) * Math.PI, y = (th / 2) * Math.cos(a), off = -edge * (1 - Math.sin(a))
+    const ny = Math.cos(a), nh = Math.sin(a), ring = []
+    for (const p of O) ring.push(push(p.x + p.nx * off, y, p.z + p.nz * off, p.nx * nh, ny, p.nz * nh, p.x / w + 0.5, p.z / d + 0.5))
+    rings.push(ring)
+  }
+  for (let k = 0; k < vseg; k++) for (let i = 0; i < M; i++) {
+    const a = rings[k][i], b = rings[k][(i + 1) % M], c = rings[k + 1][i], e = rings[k + 1][(i + 1) % M]
+    idx.push(a, c, b, b, c, e)
+  }
+  const topC = push(0, th / 2, 0, 0, 1, 0, 0.5, 0.5)
+  for (let i = 0; i < M; i++) idx.push(topC, rings[0][i], rings[0][(i + 1) % M])
+  const botC = push(0, -th / 2, 0, 0, -1, 0, 0.5, 0.5)
+  for (let i = 0; i < M; i++) idx.push(botC, rings[vseg][(i + 1) % M], rings[vseg][i])
+  return { pos, nrm, uv, idx }
+}
+// Disco con canto abullonado (mesa redonda/alta real) → reemplaza el cilindro plano
+function roundDisc(cx, cy, cz, radius, th, edge = 0.018, vseg = 5, aseg = 40) {
+  return roundRectSlab(cx, cy, cz, radius * 2, radius * 2, th, radius, edge, vseg, Math.max(2, Math.round(aseg / 4)))
+}
 
 /* ════════ texturas procedurales (PNG vía zlib) ════════ */
 function crc32(buf) {
@@ -165,7 +199,7 @@ function pngRGB(w, h, fn) {
 }
 const clamp = (v) => Math.max(0, Math.min(255, v | 0))
 const clamp01 = (v) => Math.max(0, Math.min(1, v))
-const TS = 256 // resolución de texturas (con tileado basta; el relieve lo da el normal map)
+const TS = 384 // resolución de texturas (más nítido el grano/tejido; el relieve lo da el normal map)
 // ── ruido de valor periódico (tileable) → grano orgánico, no ondas matemáticas ──
 const fade = t => t * t * (3 - 2 * t)
 const nhash = (xi, yi, P, s) => { xi = ((xi % P) + P) % P; yi = ((yi % P) + P) % P; const n = Math.sin(xi * 127.1 + yi * 311.7 + s * 57.3) * 43758.5453; return n - Math.floor(n) }
@@ -173,12 +207,20 @@ const noise2 = (x, y, P, s) => { const xi = Math.floor(x), yi = Math.floor(y), x
 // fbm tileable: x,y en 0..1; base = nº de celdas (entero); oct = octavas
 const fbm = (x, y, base, oct) => { let sum = 0, amp = 0.5, f = base, tot = 0; for (let i = 0; i < oct; i++) { sum += amp * noise2(x * f, y * f, f, i); tot += amp; amp *= 0.5; f *= 2 } return sum / tot }
 // alturas (heightfields) tileables en coords de pixel (0..TS) → de aquí salen color y normal map
+const NPLANK = 3                                              // nº de tablas a lo ancho (tileable)
 const hWood = (px, py) => {
   const x = px / TS, y = py / TS
   const warp = (fbm(x, y, 4, 3) - 0.5)                       // ondulación natural de la veta
   const ring = 0.5 + 0.5 * Math.sin(2 * Math.PI * (8 * y + 1.6 * warp)) // líneas de veta a lo largo de X
   const pore = fbm(x * 2, y * 12, 8, 3)                      // poros finos estirados (anisotrópico)
-  return clamp01(0.18 + 0.42 * ring + 0.4 * pore)
+  let v = 0.20 + 0.40 * ring + 0.40 * pore
+  // tablones: ranura (groove) en los bordes + tono propio de cada tabla → se lee como madera de verdad
+  const px3 = (x * NPLANK) % 1, edge = Math.min(px3, 1 - px3)
+  const groove = clamp01(edge / 0.03)                        // 0 en la junta, 1 dentro de la tabla
+  v -= (1 - groove) * 0.34                                   // junta más oscura/hundida
+  const plankIdx = Math.floor(x * NPLANK)
+  v += (nhash(plankIdx, 7, NPLANK, 9) - 0.5) * 0.14          // cada tabla con su tono
+  return clamp01(v)
 }
 const hFab = (px, py) => {
   const x = px / TS, y = py / TS
@@ -190,12 +232,12 @@ const hFab = (px, py) => {
 }
 // madera: grano vertical (grayscale; el color real lo da baseColorFactor)
 const TEX_WOOD = pngRGB(TS, TS, (x, y) => {
-  let v = 0.82 + 0.16 * (hWood(x, y) - 0.5) + (Math.random() - 0.5) * 0.03
+  let v = 0.80 + 0.26 * (hWood(x, y) - 0.5) + (Math.random() - 0.5) * 0.025
   const g = clamp(v * 255); return [g, g, g]
 })
-// tela: tejido fino (grayscale)
+// tela: tejido fino (grayscale) + AO sutil en los valles del tejido
 const TEX_FABRIC = pngRGB(TS, TS, (x, y) => {
-  let v = 0.83 + 0.12 * (hFab(x, y) - 0.5) + (Math.random() - 0.5) * 0.045
+  let v = 0.83 + 0.16 * (hFab(x, y) - 0.5) + (Math.random() - 0.5) * 0.04
   const g = clamp(v * 255); return [g, g, g]
 })
 // normal map a partir de un heightfield (relieve real bajo la luz)
@@ -208,16 +250,17 @@ function normalMap(w, h, hf, strength) {
     return [clamp((nx * 0.5 + 0.5) * 255), clamp((ny * 0.5 + 0.5) * 255), clamp((nz * 0.5 + 0.5) * 255)]
   })
 }
-const NRM_WOOD   = normalMap(TS, TS, hWood, 2.2)
-const NRM_FABRIC = normalMap(TS, TS, hFab, 3.0)
+const NRM_WOOD   = normalMap(TS, TS, hWood, 2.8)
+const NRM_FABRIC = normalMap(TS, TS, hFab, 3.2)
 const WHITE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64')
 
 /* ════════ materiales ════════ */
 const MAT_DEFS = {
-  fabric: { name: 'fabric', doubleSided: true, tex: 'fabric', nrm: 'nfabric', normalScale: 0.9, texScale: 4, metallic: 0, rough: 0.82, sheen: { color: [0.5, 0.5, 0.5], rough: 0.3 } },
-  legs:   { name: 'legs', doubleSided: true, metallic: 1.0, rough: 0.38, factor: [0.6, 0.62, 0.66, 1] },
-  wood:   { name: 'wood', doubleSided: true, tex: 'wood', nrm: 'nwood', normalScale: 0.55, texScale: 2, metallic: 0, rough: 0.5 },
-  logo:   { name: 'logo', doubleSided: true, alphaMode: 'BLEND', tex: 'white', metallic: 0, rough: 0.6 },
+  fabric: { name: 'fabric', doubleSided: true, tex: 'fabric', nrm: 'nfabric', normalScale: 1.0, texScale: 4, metallic: 0, rough: 0.8, sheen: { color: [0.55, 0.55, 0.55], rough: 0.28 } },
+  legs:   { name: 'legs', doubleSided: true, metallic: 1.0, rough: 0.3, factor: [0.66, 0.68, 0.72, 1] },
+  // madera con barniz: clearcoat (capa transparente brillante) → mueble de verdad, no plástico mate
+  wood:   { name: 'wood', doubleSided: true, tex: 'wood', nrm: 'nwood', normalScale: 0.7, texScale: 2, metallic: 0, rough: 0.45, clearcoat: { factor: 0.5, rough: 0.22 } },
+  logo:   { name: 'logo', doubleSided: true, alphaMode: 'MASK', alphaCutoff: 0.4, tex: 'white', emissiveTex: 'white', metallic: 0, rough: 1 },
 }
 const TEX_BYTES = { wood: TEX_WOOD, fabric: TEX_FABRIC, white: WHITE_PNG, nwood: NRM_WOOD, nfabric: NRM_FABRIC }
 
@@ -233,49 +276,49 @@ function chair() {
   const REC = -9, PY = 0.45, PZ = -0.19
   const posts = merge([tube([-0.18, 0.44, -0.18], [-0.175, 0.9, -0.18], 0.019, 32, 0.014), tube([0.18, 0.44, -0.18], [0.175, 0.9, -0.18], 0.019, 32, 0.014)])
   const legs = merge([...legParts, rotX(posts, REC, PY, PZ)])
-  const seat = roundBox(0, 0.455, 0, 0.46, 0.08, 0.45, 0.4)
-  const panel = roundBox(0, 0.70, -0.205, 0.40, 0.32, 0.06, 0.4)
+  const seat = roundBox(0, 0.45, 0, 0.46, 0.11, 0.45, 0.6)
+  const panel = roundBox(0, 0.70, -0.205, 0.40, 0.34, 0.085, 0.6)
   const fabric = merge([seat, rotX(panel, REC, PY, PZ)])
-  const logo = rotX(quadZ(0, 0.70, -0.171, 0.40, 0.32), REC, PY, PZ) // por delante del cojín (cara en -0.18)
+  const logo = rotX(quadZ(0, 0.70, -0.163, 0.40, 0.32), REC, PY, PZ) // por delante del cojín
   return [{ m: 'fabric', g: fabric }, { m: 'legs', g: legs }, { m: 'logo', g: logo }]
 }
 function table() { // mesa RECTANGULAR 1.2 × 0.75
   const TW = 1.2, TD = 0.75, TH = 0.735
   const wood = merge([
-    roundBox(0, TH, 0, TW, 0.04, TD, 0.13, 12),
-    bbox(0, TH - 0.04, 0.31, TW - 0.16, 0.06, 0.035), bbox(0, TH - 0.04, -0.31, TW - 0.16, 0.06, 0.035),
-    bbox(0.55, TH - 0.04, 0, 0.035, 0.06, TD - 0.12), bbox(-0.55, TH - 0.04, 0, 0.035, 0.06, TD - 0.12),
+    roundRectSlab(0, TH, 0, TW, TD, 0.05, 0.13, 0.022),
+    bbox(0, TH - 0.05, 0.31, TW - 0.16, 0.06, 0.035), bbox(0, TH - 0.05, -0.31, TW - 0.16, 0.06, 0.035),
+    bbox(0.55, TH - 0.05, 0, 0.035, 0.06, TD - 0.12), bbox(-0.55, TH - 0.05, 0, 0.035, 0.06, TD - 0.12),
   ])
-  const lx = TW / 2 - 0.07, lz = TD / 2 - 0.07, h = TH - 0.045
+  const lx = TW / 2 - 0.09, lz = TD / 2 - 0.09, h = TH - 0.03
   const legs = merge([
-    tube([-lx, 0, -lz], [-lx, h, -lz], 0.02, 32, 0.03), tube([lx, 0, -lz], [lx, h, -lz], 0.02, 32, 0.03),
-    tube([-lx, 0, lz], [-lx, h, lz], 0.02, 32, 0.03), tube([lx, 0, lz], [lx, h, lz], 0.02, 32, 0.03),
+    tube([-lx, 0, -lz], [-lx, h, -lz], 0.022, 32, 0.032), tube([lx, 0, -lz], [lx, h, -lz], 0.022, 32, 0.032),
+    tube([-lx, 0, lz], [-lx, h, lz], 0.022, 32, 0.032), tube([lx, 0, lz], [lx, h, lz], 0.022, 32, 0.032),
   ])
-  const logo = quadY(0, TH + 0.021, 0, 0.9, 0.56)
+  const logo = quadY(0, TH + 0.031, 0, 0.9, 0.56)
   return [{ m: 'wood', g: wood }, { m: 'legs', g: legs }, { m: 'logo', g: logo }]
 }
 function squareTable() { // mesacuad 0.72
-  const S = 0.72, TH = 0.735, l = S / 2 - 0.06, h = TH - 0.045
+  const S = 0.72, TH = 0.735, l = S / 2 - 0.08, h = TH - 0.03
   const wood = merge([
-    roundBox(0, TH, 0, S, 0.04, S, 0.13, 12),
-    bbox(0, TH - 0.04, 0.27, S - 0.14, 0.06, 0.035), bbox(0, TH - 0.04, -0.27, S - 0.14, 0.06, 0.035),
+    roundRectSlab(0, TH, 0, S, S, 0.05, 0.11, 0.02),
+    bbox(0, TH - 0.05, 0.27, S - 0.14, 0.06, 0.035), bbox(0, TH - 0.05, -0.27, S - 0.14, 0.06, 0.035),
   ])
   const legs = merge([
     tube([-l, 0, -l], [-l, h, -l], 0.018, 32, 0.028), tube([l, 0, -l], [l, h, -l], 0.018, 32, 0.028),
     tube([-l, 0, l], [-l, h, l], 0.018, 32, 0.028), tube([l, 0, l], [l, h, l], 0.018, 32, 0.028),
   ])
-  const logo = quadY(0, TH + 0.021, 0, 0.6, 0.6)
+  const logo = quadY(0, TH + 0.031, 0, 0.6, 0.6)
   return [{ m: 'wood', g: wood }, { m: 'legs', g: legs }, { m: 'logo', g: logo }]
 }
 function confTable() { // mesaconf: larga 1.9 × 0.9 con patas tipo panel
   const TW = 1.9, TD = 0.9, TH = 0.74
-  const wood = merge([roundBox(0, TH, 0, TW, 0.05, TD, 0.11, 12)])
+  const wood = merge([roundRectSlab(0, TH, 0, TW, TD, 0.055, 0.14, 0.024)])
   const legs = merge([
     bbox(-0.8, 0.35, 0, 0.05, 0.66, TD - 0.18, 0.012), bbox(0.8, 0.35, 0, 0.05, 0.66, TD - 0.18, 0.012),
     bbox(-0.8, 0.05, 0, 0.07, 0.06, TD - 0.08), bbox(0.8, 0.05, 0, 0.07, 0.06, TD - 0.08),
     tube([-0.8, 0.4, 0], [0.8, 0.4, 0], 0.03),
   ])
-  const logo = quadY(0, TH + 0.026, 0, 1.4, 0.62)
+  const logo = quadY(0, TH + 0.034, 0, 1.4, 0.62)
   return [{ m: 'wood', g: wood }, { m: 'legs', g: legs }, { m: 'logo', g: logo }]
 }
 function stackChair() { // sillapil: asiento fino, respaldo de listones, marco tubular
@@ -329,24 +372,24 @@ function armchair() { // butaca individual (1 plaza)
   return [{ m: 'fabric', g: fabric }, { m: 'legs', g: feet }, { m: 'logo', g: logo }]
 }
 function diningSet() { // set: mesa + 2 sillas
-  const TH = 0.70, S = 0.66, tl = S / 2 - 0.06
-  const wood = bbox(0, TH, 0, S, 0.04, S, 0.014)
+  const TH = 0.70, S = 0.66, tl = S / 2 - 0.08
+  const wood = roundRectSlab(0, TH, 0, S, S, 0.045, 0.09, 0.018)
   const tlegs = []
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) tlegs.push(tube([sx * tl, 0, sz * tl], [sx * tl, TH - 0.045, sz * tl], 0.025))
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) tlegs.push(tube([sx * tl, 0, sz * tl], [sx * tl, TH - 0.03, sz * tl], 0.022, 32, 0.028))
   const seats = [], backs = [], clegs = []
   for (const [zc, bd] of [[0.6, 1], [-0.6, -1]]) {
-    seats.push(roundBox(0, 0.43, zc, 0.4, 0.06, 0.4, 0.35))
-    backs.push(roundBox(0, 0.56, zc + bd * 0.18, 0.4, 0.3, 0.06, 0.35))
+    seats.push(roundBox(0, 0.43, zc, 0.4, 0.09, 0.4, 0.55))
+    backs.push(roundBox(0, 0.57, zc + bd * 0.18, 0.4, 0.32, 0.08, 0.55))
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) clegs.push(tube([sx * 0.16, 0, zc + sz * 0.16], [sx * 0.16, 0.43, zc + sz * 0.16], 0.017))
   }
   const fabric = merge([...seats, ...backs])
   const legs = merge([...tlegs, ...clegs])
-  const logo = quadY(0, TH + 0.021, 0, 0.5, 0.5)
+  const logo = quadY(0, TH + 0.03, 0, 0.5, 0.5)
   return [{ m: 'fabric', g: fabric }, { m: 'wood', g: wood }, { m: 'legs', g: legs }, { m: 'logo', g: logo }]
 }
 function barSet() { // setbar: mesa alta redonda + 2 taburetes
   const H = 1.05
-  const wood = merge([tube([0, H, 0], [0, H + 0.035, 0], 0.30, 40)])
+  const wood = merge([roundDisc(0, H, 0, 0.30, 0.045, 0.018)])
   const legs = [tube([0, 0.05, 0], [0, H, 0], 0.04), tube([0, 0, 0], [0, 0.05, 0], 0.22, 32)]
   const sseats = []
   for (const sx of [-1, 1]) {
@@ -390,16 +433,16 @@ function bench() {
   return [{ m: 'fabric', g: fabric }, { m: 'legs', g: legs }, { m: 'logo', g: logo }]
 }
 function roundTable() {
-  const wood = merge([tube([0, 0.72, 0], [0, 0.755, 0], 0.5, 48)])
-  const legs = merge([tube([0, 0.05, 0], [0, 0.72, 0], 0.05), tube([0, 0, 0], [0, 0.05, 0], 0.27, 36)])
-  const logo = quadY(0, 0.756, 0, 1.0, 1.0) // tablero redondo Ø1.0 (esquinas del quad quedan transparentes)
+  const wood = merge([roundDisc(0, 0.735, 0, 0.5, 0.05, 0.02)])
+  const legs = merge([tube([0, 0.05, 0], [0, 0.71, 0], 0.05), tube([0, 0, 0], [0, 0.05, 0], 0.27, 36)])
+  const logo = quadY(0, 0.765, 0, 1.0, 1.0) // tablero redondo Ø1.0 (esquinas del quad quedan transparentes)
   return [{ m: 'wood', g: wood }, { m: 'legs', g: legs }, { m: 'logo', g: logo }]
 }
 function barTable() {
   const H = 1.05
-  const wood = merge([tube([0, H, 0], [0, H + 0.035, 0], 0.34, 44)])
-  const legs = merge([tube([0, 0.05, 0], [0, H, 0], 0.045), tube([0, 0, 0], [0, 0.05, 0], 0.24, 32)])
-  const logo = quadY(0, H + 0.036, 0, 0.68, 0.68) // tablero redondo Ø0.68
+  const wood = merge([roundDisc(0, H, 0, 0.34, 0.045, 0.018)])
+  const legs = merge([tube([0, 0.05, 0], [0, H - 0.02, 0], 0.045), tube([0, 0, 0], [0, 0.05, 0], 0.24, 32)])
+  const logo = quadY(0, H + 0.03, 0, 0.68, 0.68) // tablero redondo Ø0.68
   return [{ m: 'wood', g: wood }, { m: 'legs', g: legs }, { m: 'logo', g: logo }]
 }
 function barCounter() {
@@ -451,7 +494,7 @@ function buildGLB(prims) {
     return { attributes: { POSITION: posA, NORMAL: nrmA, TEXCOORD_0: uvA }, indices: idxA, material: matIndex[p.m], mode: 4 }
   })
 
-  let usesTransform = false, usesSheen = false
+  let usesTransform = false, usesSheen = false, usesClearcoat = false
   const materials = matOrder.map(k => {
     const d = MAT_DEFS[k]
     const pbr = { baseColorFactor: d.factor || [1, 1, 1, 1], metallicFactor: d.metallic, roughnessFactor: d.rough }
@@ -469,7 +512,13 @@ function buildGLB(prims) {
       usesSheen = true
       mat.extensions = { ...(mat.extensions || {}), KHR_materials_sheen: { sheenColorFactor: d.sheen.color, sheenRoughnessFactor: d.sheen.rough } }
     }
+    if (d.clearcoat) {
+      usesClearcoat = true
+      mat.extensions = { ...(mat.extensions || {}), KHR_materials_clearcoat: { clearcoatFactor: d.clearcoat.factor, clearcoatRoughnessFactor: d.clearcoat.rough } }
+    }
     if (d.alphaMode) mat.alphaMode = d.alphaMode
+    if (d.alphaCutoff != null) mat.alphaCutoff = d.alphaCutoff
+    if (d.emissiveTex) { mat.emissiveTexture = { index: texIndex[d.emissiveTex] }; mat.emissiveFactor = [0, 0, 0] }
     return mat
   })
 
@@ -477,6 +526,7 @@ function buildGLB(prims) {
   const exts = []
   if (usesTransform) exts.push('KHR_texture_transform')
   if (usesSheen) exts.push('KHR_materials_sheen')
+  if (usesClearcoat) exts.push('KHR_materials_clearcoat')
   if (exts.length) gltf.extensionsUsed = exts
   if (texKeys.length) {
     gltf.images = texKeys.map(k => ({ bufferView: addView(TEX_BYTES[k]), mimeType: 'image/png' }))
