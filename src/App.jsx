@@ -161,10 +161,42 @@ const hexToLinear = (hex) => {
 }
 
 const loadImage = (src) => new Promise((res, rej) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => res(im); im.onerror = rej; im.src = src })
+// Quita el fondo SÓLIDO (negro/blanco/color uniforme) de un logo subido → sale limpio
+// aunque el cliente suba un JPG con fondo. Si el logo ya es transparente o el fondo no
+// es uniforme, devuelve la imagen tal cual (no rompe logos con foto/degradado).
+function autoKeyBackground(img) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+  const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0)
+  let id
+  try { id = ctx.getImageData(0, 0, w, h) } catch { return cv }  // CORS → sin keying
+  const d = id.data
+  // muestrea las 4 esquinas (2px adentro)
+  const corners = [[2, 2], [w - 3, 2], [2, h - 3], [w - 3, h - 3]].map(([x, y]) => {
+    const i = (y * w + x) * 4; return [d[i], d[i + 1], d[i + 2], d[i + 3]]
+  })
+  if (corners.some(c => c[3] < 250)) return cv  // ya tiene transparencia → no tocar
+  const bg = [0, 1, 2].map(k => corners.reduce((s, c) => s + c[k], 0) / 4)
+  // ¿las esquinas son del mismo color? (fondo sólido). Si no, no keyear.
+  const spread = Math.max(...corners.map(c => Math.hypot(c[0] - bg[0], c[1] - bg[1], c[2] - bg[2])))
+  if (spread > 28) return cv
+  const TOL = 70, FEATHER = 1.7
+  for (let i = 0; i < d.length; i += 4) {
+    const dist = Math.hypot(d[i] - bg[0], d[i + 1] - bg[1], d[i + 2] - bg[2])
+    if (dist < TOL) d[i + 3] = 0
+    else if (dist < TOL * FEATHER) d[i + 3] = Math.round(255 * (dist - TOL) / (TOL * (FEATHER - 1)))
+  }
+  ctx.putImageData(id, 0, 0)
+  return cv
+}
+// Cache del logo ya recortado (por URL) → no re-procesa el fondo en cada movimiento del slider
+const _keyedCache = new Map()
 // Dibuja el logo en un lienzo con la posición/giro/tamaño del editor → se usa como textura del respaldo/tablero en AR
 async function composeLogoTexture(logoUrl, pl, aspect = 1, round = false) {
-  const img = await loadImage(logoUrl)
-  const S = 512
+  let img = _keyedCache.get(logoUrl)
+  if (!img) { img = autoKeyBackground(await loadImage(logoUrl)); _keyedCache.set(logoUrl, img) }  // quita fondo sólido si lo hay
+  // Resolución alta para que el logo NO se vea borroso en AR a tamaño real (antes 512).
+  const S = 2048
   // Lienzo con la MISMA proporción que la superficie (ancho/alto). Así el mapeo
   // lienzo→mueble es uniforme: el logo conserva su forma y el 0–100% de los
   // sliders llega al borde por igual en mesa cuadrada, banca, barra, etc.
@@ -173,6 +205,7 @@ async function composeLogoTexture(logoUrl, pl, aspect = 1, round = false) {
   const H = A >= 1 ? Math.round(S / A) : S
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H
   const ctx = cv.getContext('2d')
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'
   let cx = ((pl?.x ?? 50) / 100) * W
   let cy = ((pl?.y ?? 45) / 100) * H
   // Superficie redonda: el centro del logo no puede salir del círculo del tablero
@@ -1373,7 +1406,7 @@ function RoomScene({ model, accent, wood, steel, logo, placement, estType }) {
 }
 
 /* ════════════════ AR MODAL (Realidad Aumentada con model-viewer) ════════════════ */
-function ARModal({ model, logo, finish, placement, onClose, srcUrl }) {
+function ARModal({ model, logo, finish, placement, onClose, srcUrl, autoRotate = true, initialOrbit, exposure = '1.05' }) {
   const C = useContext(ThemeCtx)
   const src = srcUrl || asset(arModelFor(model.svgType))
   const mvRef = useRef(null)
@@ -1473,7 +1506,8 @@ function ARModal({ model, logo, finish, placement, onClose, srcUrl }) {
           ar-scale="auto"
           camera-controls="true"
           disable-pan="true"
-          auto-rotate="true"
+          auto-rotate={autoRotate ? 'true' : undefined}
+          camera-orbit={initialOrbit}
           interaction-prompt="none"
           min-camera-orbit="auto auto 45%"
           max-camera-orbit="auto 100deg 170%"
@@ -1482,7 +1516,7 @@ function ARModal({ model, logo, finish, placement, onClose, srcUrl }) {
           tone-mapping="commerce"
           shadow-intensity="1.9"
           shadow-softness="0.55"
-          exposure="1.05"
+          exposure={exposure}
           loading="eager"
           reveal="auto"
           alt={model.name}
@@ -1942,12 +1976,17 @@ const MODELOS_3D = [
   { id:'setbar',    name:'Set Mesa Alta + Taburetes', cat:'Sets', svgType:'setbar',  color:'#F59E0B' },
   { id:'setespera', name:'Set Sala de Espera',     cat:'Sets',   svgType:'setespera', color:'#10B981' },
 ]
+// Muebles REALES escaneados (fotogrametría) — se muestran tal cual, sin recolor ni logo
+const REAL_MODELS = [
+  { id:'silla-ejecutiva-real', name:'Silla Ejecutiva (modelo real)', glb:'/models/silla-ejecutiva-real.glb', thumb:'/img/reales/silla-ejecutiva.png', orbit:'20deg 80deg 100%' },
+]
 function ConfiguradorSection() {
   const C = useContext(ThemeCtx)
   const [logo,       setLogo]       = useState(null)
   const [placements, setPlacements] = useState({})   // { [modelId]: {x,y,scale,tilt,rotate} }
   const [finishes,   setFinishes]   = useState({})   // { [modelId]: {wood,steel,uph} }
   const [editModel,  setEditModel]  = useState(null)  // mueble que se está personalizando
+  const [realAr,     setRealAr]     = useState(null)  // modelo REAL escaneado abierto en el visor
   const { qtyOf, add, inc, dec, totalQty, setOpen } = useCart()
   const fileRef = useRef(null)
 
@@ -2047,6 +2086,36 @@ function ConfiguradorSection() {
                 </div>
               </div>
 
+              {/* Modelos REALES escaneados (fotogrametría) */}
+              {REAL_MODELS.length > 0 && (
+                <div className="mb-10">
+                  <div className="flex items-center gap-3 mb-2 flex-wrap">
+                    <span className="text-[11px] font-outfit font-black uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ background: C.sand, color: C.petrol }}>Nuevo</span>
+                    <h2 className="font-outfit font-black text-xl uppercase" style={{ color: C.carbon }}>Modelos reales</h2>
+                  </div>
+                  <p className="text-xs font-nunito mb-5" style={{ color: C.stone }}>
+                    Muebles reales de Korbax escaneados en 3D — míralos a tamaño real en tu local con Realidad Aumentada.
+                  </p>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    {REAL_MODELS.map(rm => (
+                      <div key={rm.id} className="rounded-2xl border overflow-hidden flex flex-col" style={{ background: C.ivory, borderColor: C.border }}>
+                        <div className="aspect-square overflow-hidden flex items-center justify-center" style={{ background: 'radial-gradient(circle at 50% 35%,#ffffff,#e7ecf0 70%,#c9d2d9)' }}>
+                          <img src={asset(rm.thumb)} alt={rm.name} className="w-full h-full object-contain" loading="lazy" />
+                        </div>
+                        <div className="p-3 flex flex-col gap-2 flex-1">
+                          <p className="font-nunito font-extrabold text-sm leading-snug" style={{ color: C.carbon }}>{rm.name}</p>
+                          <button onClick={() => setRealAr(rm)}
+                            className="mt-auto w-full rounded-xl py-2.5 font-outfit font-black text-xs uppercase flex items-center justify-center gap-1.5 transition-opacity hover:opacity-90"
+                            style={{ background: C.petrol, color: C.onDark }}>
+                            <Sparkles size={14} style={{ color: C.sand }} /> Ver en 3D y AR
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Paso 2: Modelos 3D */}
               <div className="mb-2">
                 <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -2113,6 +2182,19 @@ function ConfiguradorSection() {
             setFinishes(prev => ({ ...prev, [editModel.id]: finish }))
             setEditModel(null)
           }}
+        />
+      )}
+
+      {/* Visor 3D/AR de modelo REAL escaneado (tal cual; acepta logo en el panel del respaldo) */}
+      {realAr && (
+        <ARModal
+          model={{ name: realAr.name, svgType: 'real' }}
+          srcUrl={asset(realAr.glb)}
+          logo={logo}
+          autoRotate={false}
+          initialOrbit={realAr.orbit}
+          exposure="1.3"
+          onClose={() => setRealAr(null)}
         />
       )}
     </section>

@@ -26,3 +26,6 @@ dist-ssr
 # Helpers dev
 .video/
 .devserver.log
+
+# Archivos de trabajo de escaneos 3D (pesados, intermedios)
+_scans/
