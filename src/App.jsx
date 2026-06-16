@@ -3496,6 +3496,20 @@ Modelos 3D para personalizar <ChevronRight size={16} />
                 <p className="font-outfit font-black text-base uppercase tracking-wide leading-none" style={{ color: C.carbon }}>Industrias Korbax</p>
                 <p className="text-xs font-nunito font-semibold mt-1" style={{ color: C.sand }}>Villa El Salvador · Lima, Perú</p>
               </div>
+              {/* Badges de confianza — versión MÓVIL (los flotantes de desktop están hidden sm) */}
+              <div className="grid grid-cols-3 gap-2 w-full sm:hidden">
+                {[
+                  { icon: Award,       t: 'Precios de Fábrica', s: 'Sin intermediarios' },
+                  { icon: Truck,       t: 'Envíos',             s: 'A todo el Perú' },
+                  { icon: ShieldCheck, t: 'Alta calidad',       s: 'Garantizada' },
+                ].map(({ icon: Ic, t, s }, i) => (
+                  <div key={i} className="rounded-xl border px-2 py-2.5 flex flex-col items-center text-center gap-1 shadow-sm" style={{ background: C.ivory, borderColor: C.border }}>
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${C.sand}15` }}><Ic size={14} style={{ color: C.sand }} /></div>
+                    <p className="text-[11px] font-bold font-nunito leading-tight" style={{ color: C.carbon }}>{t}</p>
+                    <p className="text-[9px] font-nunito leading-tight" style={{ color: C.stone }}>{s}</p>
+                  </div>
+                ))}
+              </div>
             </div>
             <div className="hero-shape-2 hidden sm:flex absolute bottom-2 -left-4 rounded-2xl shadow-lg px-3.5 py-2.5 items-center gap-2.5 border" style={{ background: C.ivory, borderColor: C.border }}>
               <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${C.sand}15` }}><ShieldCheck size={15} style={{ color: C.sand }} /></div>
